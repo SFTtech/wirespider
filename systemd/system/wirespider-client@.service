@@ -1,0 +1,12 @@
+[Unit]
+Description=Wirespider client for device %i
+After=wirespider-server.service
+
+[Service]
+Type=simple
+Restart=on-failure
+EnvironmentFile=/etc/wirespider/%i
+ExecStart=/usr/local/bin/wirespider client start --device %i
+
+[Install]
+WantedBy=multi-user.target

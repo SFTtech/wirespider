@@ -1,0 +1,139 @@
+syntax = "proto3";
+package wirespider;
+
+service Wirespider {
+    rpc getAddresses (AddressRequest) returns (AddressReply);
+    rpc getEvents (EventsRequest) returns (stream Event);
+
+    // --- manage ---
+    // peers
+    rpc addPeer (AddPeerRequest) returns (AddPeerReply);
+    rpc deletePeer (DeletePeerRequest) returns (DeletePeerReply);
+    rpc changePeer (ChangePeerRequest) returns (ChangePeerReply);
+
+    // routes
+    rpc addRoute (Route) returns (AddRouteReply);
+    rpc delRoute (Route) returns (DelRouteReply);
+}
+
+message AddressRequest {
+    bytes wg_public_key = 1;
+    NodeType node_type = 2;
+}
+
+message AddressReply {
+    repeated Network address = 1;
+}
+
+message PeersRequest {}
+
+message PeersReply {
+    repeated Peer peers = 1;
+}
+
+message RoutesRequest {}
+
+message RoutesReply {
+    repeated Route routes = 1;
+}
+
+message EventsRequest {
+    uint64 start_event = 1;
+}
+
+
+message AddPeerRequest {
+    string name = 1;
+    repeated Network internal_ip = 2;
+    int32 permissions = 3;
+}
+
+message AddPeerReply {
+    bytes token = 1;
+}
+
+message DeletePeerRequest {
+    PeerIdentifier id = 1;
+}
+
+message DeletePeerReply {}
+
+message ChangePeerRequest {
+    PeerIdentifier id = 1;
+    oneof what {
+        uint32 permission_level = 2;
+        Endpoint endpoint = 3;
+    }
+}
+
+message ChangePeerReply {}
+
+message AddRouteReply {}
+
+message DelRouteReply {}
+
+message PeerIdentifier {
+    oneof identifier {
+        bytes token = 1;
+        bytes public_key = 2;
+        string name = 3;
+    }
+}
+
+enum EventType {
+    NEW = 0;
+    CHANGED = 1;
+    DELETED = 2;
+}
+
+enum NodeType {
+    DEFAULT = 0;
+    NAT = 1;
+    NEEDRELAY = 2;
+    MONITOR = 3;
+    RELAY = 4;
+    RELAYMONITOR = 5;
+}
+
+message Event {
+    EventType type = 1;
+    uint64 id = 2;
+    oneof target {
+        Route route = 3;
+        Peer peer = 4;
+    }
+}
+
+message Peer {
+    bytes wg_public_key = 1;
+    oneof endpoint {
+        Endpoint addr = 2;
+    }
+    repeated Network allowed_ips = 3;
+    string name = 4;
+    NodeType node_type = 5;
+}
+
+message Endpoint {
+    IP ip = 1;
+    uint32 port = 2;
+}
+
+
+
+message Route {
+    Network to = 2;
+    IP via = 3;
+}
+
+message IP {
+    oneof type {
+        fixed32 ipv4 = 1;
+        bytes ipv6 = 2;
+    }
+}
+
+message Network {
+    IP ip = 1;
+    uint32 prefix_len = 2;
+}

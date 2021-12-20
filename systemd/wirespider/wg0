@@ -1,0 +1,5 @@
+WS_ENDPOINT=http://localhost:49582
+WS_TOKEN=cbbb7512-fed9-4fbe-a127-d65094ffdf04
+WS_PRIVATE_KEY=/etc/wirespider/keys/wg0
+WS_NODE_TYPE=relaymonitor
+WS_LISTEN_PORT=51820

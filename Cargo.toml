@@ -1,0 +1,51 @@
+[package]
+name = "wirespider"
+version = "0.1.0"
+authors = ["Linus Lotz <linus@lotz.li>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "=3.0.0-rc.7", features = ["derive","env"] }
+lazy_static = "1.4.0"
+
+#wireguard
+x25519-dalek-ng = "1.1"
+wireguard-uapi = "2.0.1"
+
+# grpc
+tonic = { version = "0.6.2", features = ["tls", "tls-webpki-roots"]}
+prost = "0.9"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "time"] }
+tokio-stream = { version = "0.1", features = ["net", "time"] }
+async-stream = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+
+#database
+sqlx = { version = "0.5", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
+base64 = "0.13"
+rand = { version = "0.8", features = ["getrandom"] }
+ipnet = "2.3"
+uuid = { version = "0.8", features = ["v4"] }
+tempfile = "3.2"
+
+# tracing
+tracing = {version = "0.1", features = ["release_max_level_debug"] }
+tracing-subscriber = "0.3"
+tracing-error = "0.2"
+tracing-unwrap = "0.9"
+
+[build-dependencies]
+tonic-build = { version = "0.6" }
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = 'unwind'
+incremental = false
+overflow-checks = false
