@@ -152,7 +152,7 @@ impl ManagementInterface for CommandLineInterface {
 
     fn delete_device_if_exists(device_name: &str) {
         let output = Command::new("ip")
-        .args(&["link", "del", &device_name])
+        .args(&["link", "del", device_name])
         .output()
         .expect("failed to execute process");
         debug!("{:?}", output);

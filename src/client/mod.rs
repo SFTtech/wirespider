@@ -222,8 +222,8 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                                 });
                                 let pubkey : WireguardKey = peer.wg_public_key.try_into().unwrap();
                                 let allowed_ips : Vec<IpNet> = peer.allowed_ips.into_iter().map(|x| x.try_into().unwrap()).collect();
-                                let peer_flags = peer.node_flags.unwrap_or_else(|| NodeFlags {monitor: false, relay: false});
-                                let peer_nat_type = NatType::from_i32(peer.nat_type).unwrap_or_else(|| NatType::NoNat);                                
+                                let peer_flags = peer.node_flags.unwrap_or(NodeFlags {monitor: false, relay: false});
+                                let peer_nat_type = NatType::from_i32(peer.nat_type).unwrap_or(NatType::NoNat);                                
                                 let keep_alive = if peer_flags.monitor {
                                     Some(start_opts.keep_alive)
                                 } else {
