@@ -47,7 +47,7 @@ pub async fn get_nat_type(port: NonZeroU16) -> Result<(Option<SocketAddr>, NatTy
     let stun_host = lookup_host(STUN_SERVER)
         .await
         .or(Err(()))?
-        .next()
+        .find(|x| x.is_ipv4())
         .ok_or(())?;
     debug!("Using {} for STUN", stun_host);
     let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::new(0, 0, 0, 0), port.into())))
