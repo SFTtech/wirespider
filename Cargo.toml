@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["Linus Karl <linus@lotz.li>"]
 license = "GPL-3"
 edition = "2021"
+readme = "README.md"
+description = "Wirespider distributes wireguard tunnel configurations and routes"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
