@@ -7,6 +7,8 @@ use server::{server, ServerCli};
 #[macro_use]
 extern crate lazy_static;
 
+#[macro_use] extern crate trackable;
+
 #[derive(Parser, Debug)]
 #[clap(name = "spider")]
 enum Cli {

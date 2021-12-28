@@ -4,23 +4,32 @@ use std::{convert::TryInto, net::IpAddr, num::NonZeroU16};
 mod interface;
 mod client_state;
 mod monitor;
+mod nat;
 
 use futures::TryStreamExt;
 use interface::ManagementInterface;
 use ipnet::IpNet;
 use peer_identifier::Identifier;
+use rand::Rng;
+use tracing::metadata::LevelFilter;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::Registry;
+use tracing_subscriber::prelude::*;
+use tracing_unwrap::ResultExt;
 use x25519_dalek_ng::{StaticSecret, PublicKey};
 use clap::Parser;
 use clap::{ArgGroup, ValueHint, Args, Subcommand};
 use tonic::{Request, metadata::MetadataValue, transport::{Uri, Endpoint}};
 use wirespider::{WireguardKey, protocol::wirespider_client::WirespiderClient};
-use wirespider::protocol::{*, self};
+use wirespider::protocol::*;
 use base64::{decode,encode};
 use uuid::Uuid;
 use rand::rngs::OsRng;
 use client_state::ClientState;
 
 use interface::DefaultInterface;
+
+use crate::client::nat::get_nat_type;
 
 lazy_static! {
     static ref CLIENT_STATE: ClientState = ClientState::default();
@@ -59,8 +68,10 @@ struct StartCommand {
     device: String,
     #[clap(short, long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY")]
     private_key: String,
-    #[clap(short, long, default_value = "default", env = "WS_NODE_TYPE")]
-    node_type: String,
+    #[clap(short, long, env = "WS_NODE_MONITOR")]
+    monitor: bool,
+    #[clap(short, long, env = "WS_NODE_RELAY")]
+    relay: bool,
     #[clap(short, long, default_value = "25", env = "WS_KEEP_ALIVE")]
     keep_alive: NonZeroU16,
     #[clap(short, long, env = "WS_LISTEN_PORT")]
@@ -135,6 +146,16 @@ struct DeleteRouteCommand {
 }
 
 pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
+    let log_level = if opt.debug {LevelFilter::DEBUG} else {LevelFilter::INFO};
+    // logging
+    let subscriber = Registry::default()
+        .with(log_level)
+        .with(ErrorLayer::default())
+        .with(tracing_subscriber::fmt::layer());
+    
+  
+    tracing::subscriber::set_global_default(subscriber)?;
+
     let mut rng = OsRng::default();
     let endpoint = Endpoint::from(opt.endpoint);
     let channel = endpoint.connect().await?;
@@ -145,14 +166,12 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
     });
     match opt.command {
         Command::Start(start_opts) => {
-            let node_type = match start_opts.node_type.as_str() {
-                "default" => protocol::NodeType::Default,
-                "nat" => protocol::NodeType::Nat,
-                "monitor" => protocol::NodeType::Monitor,
-                "relay" => protocol::NodeType::Relay,
-                "relaymonitor" => protocol::NodeType::Relaymonitor,
-                _ => panic!("Invalid node type. Must be default, nat, monitor, relay or relaymonitor")
-            };
+            // delete the existing device, so we do not disturb the nat detection
+            DefaultInterface::delete_device_if_exists(&start_opts.device);
+
+            let port = start_opts.port.unwrap_or_else(|| rng.gen_range(49192..=65535).try_into().unwrap());
+            let nat_detection = tokio::spawn(get_nat_type(port));
+
             let private_key = if std::path::Path::new(&start_opts.private_key).exists() {
                 let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key).await.expect("Could not read private key");
                 let private_key = decode(private_key_encoded).expect("Could not decode private key");
@@ -168,14 +187,18 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                 tokio::fs::write(&start_opts.private_key, &encoded).await?;
                 private_key
             };
+            let (external_address, nat_type) = nat_detection.await.unwrap_or_log().expect("Could not determine NAT, are you connected to the internet?");
             let address_list =  client.get_addresses(AddressRequest {
                 wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
-                node_type: node_type.into(),
+                nat_type: nat_type as i32,
+                node_flags: Some(NodeFlags{monitor: start_opts.monitor, relay: start_opts.relay}),
+                endpoint: external_address.map(|x| x.into()),
+
             }).await?.into_inner();
             println!("{:?}", address_list);
             let address_list = address_list.address.into_iter().map(|x| x.try_into().unwrap()).collect();
 
-            let interface = DefaultInterface::create_device(start_opts.device.clone(), private_key.to_bytes(), start_opts.port, address_list)
+            let interface = DefaultInterface::create_device(start_opts.device.clone(), private_key.to_bytes(), Some(port), address_list)
                 .expect("Could not set up wireguard device");
 
             let monitor = monitor::Monitor::new(start_opts.device.clone());
@@ -199,17 +222,24 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                                 });
                                 let pubkey : WireguardKey = peer.wg_public_key.try_into().unwrap();
                                 let allowed_ips : Vec<IpNet> = peer.allowed_ips.into_iter().map(|x| x.try_into().unwrap()).collect();
-                                let peer_node_type = peer.node_type.try_into().unwrap_or( NodeType::Default);
-                                let keep_alive = match (node_type, peer_node_type) {
-                                    (NodeType::Nat | NodeType::Needrelay, _) | (_, NodeType::Monitor | NodeType::Relaymonitor) => Some(start_opts.keep_alive),
-                                    _ => None,
+                                let peer_flags = peer.node_flags.unwrap_or_else(|| NodeFlags {monitor: false, relay: false});
+                                let peer_nat_type = NatType::from_i32(peer.nat_type).unwrap_or_else(|| NatType::NoNat);                                
+                                let keep_alive = if peer_flags.monitor {
+                                    Some(start_opts.keep_alive)
+                                } else {
+                                    match nat_type {
+                                        NatType::NoNat => None,
+                                        _ => Some(start_opts.keep_alive),
+                                    }
                                 };
-                                let create = match (node_type, peer_node_type) {
-                                    (NodeType::Needrelay, NodeType::Relay | NodeType::Relaymonitor) => true,
-                                    (NodeType::Relay | NodeType::Relaymonitor, NodeType::Needrelay) => true,
-                                    (NodeType::Needrelay, _) => false,
-                                    (_, NodeType::Needrelay) => false,
-                                    (_,_) => true,
+                                let create = if start_opts.monitor || start_opts.relay {
+                                    true
+                                } else {
+                                    match (nat_type, peer_nat_type) {
+                                        (NatType::Symmetric, NatType::Symmetric | NatType::PortRestrictedCone) => false,
+                                        (NatType::PortRestrictedCone, NatType::Symmetric) => false,
+                                        (_, _) => true,
+                                    }
                                 };
                                 if create {
                                     interface.set_peer(pubkey, endpoint, keep_alive, &allowed_ips).unwrap();

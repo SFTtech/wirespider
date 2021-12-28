@@ -4,6 +4,7 @@ use std::{net::{IpAddr, SocketAddr}, num::NonZeroU16};
 
 pub trait ManagementInterface : Sized {
     type Error;
+    fn delete_device_if_exists(device_name: &str);
     fn create_device(device_name: String, privkey: WireguardKey, port: Option<NonZeroU16>, addresses: Vec<IpNet>) -> Result<Self,Self::Error>;
     fn set_peer(&self, pubkey: WireguardKey, endpoint: Option<SocketAddr>, persistent_keepalive: Option<NonZeroU16>, allowed_ips: &[IpNet]) -> Result<(),Self::Error>;
     fn remove_peer(&self, pubkey: WireguardKey) -> Result<(),Self::Error>;

@@ -49,7 +49,9 @@ pub struct WirespiderServerState {
 struct AuthenticatedPeer {
     peerid: i64,
     permissions: i32,
-    node_type: i32,
+    nat_type: i32,
+    monitor: bool,
+    relay: bool,
 }
 
 trait TracingIntoStatusExt<T> {
@@ -112,7 +114,7 @@ impl WirespiderServerState {
         let (_, token) = auth_str.split_at(7);
         let uuid = Uuid::from_str(token)
             .map_err(|_| Status::permission_denied("Invalid authorization"))?;
-        let result = sqlx::query(r#"SELECT peerid,permissions,node_type FROM peers WHERE token=?"#)
+        let result = sqlx::query(r#"SELECT peerid,permissions,nat_type,monitor,relay FROM peers WHERE token=?"#)
             .bind(uuid)
             .fetch_one(&self.sqlite_pool)
             .await
@@ -121,7 +123,9 @@ impl WirespiderServerState {
             Ok(AuthenticatedPeer {
                 peerid: result.get("peerid"),
                 permissions: result.get("permissions"),
-                node_type: result.get("node_type"),
+                nat_type: result.get("nat_type"),
+                monitor: result.get("monitor"),
+                relay: result.get("relay"),
             })
         } else {
             Err(Status::permission_denied("Insufficient Permissions"))
@@ -166,7 +170,7 @@ impl WirespiderServerState {
     #[instrument]
     async fn get_peer_from_peerid(&self, peerid: i64) -> Result<Option<Peer>, Status> {
         let peer_data = sqlx::query(
-            r#"SELECT peer_name,pubkey,static_endpoint,node_type FROM peers WHERE peerid=?"#,
+            r#"SELECT peer_name,pubkey,current_endpoint,nat_type,monitor,relay FROM peers WHERE peerid=?"#,
         )
         .bind(peerid)
         .fetch_one(&self.sqlite_pool)
@@ -180,7 +184,7 @@ impl WirespiderServerState {
         if pubkey.is_none() {
             return Ok(None);
         }
-        let endpoint_unparsed: Option<String> = peer_data.get("static_endpoint");
+        let endpoint_unparsed: Option<String> = peer_data.get("current_endpoint");
         let endpoint = match endpoint_unparsed {
             Some(data) => Some(
                 data.parse()
@@ -202,7 +206,9 @@ impl WirespiderServerState {
             peer_data.get("peer_name"),
             endpoint,
             allowed_ips,
-            peer_data.get("node_type"),
+            peer_data.get("monitor"),
+            peer_data.get("relay"),
+            peer_data.get("nat_type"),
         )))
     }
 
@@ -260,7 +266,7 @@ impl WirespiderServerState {
         auth_peer: &AuthenticatedPeer,
     ) -> Result<Vec<Event>, Status> {
         let mut events = Vec::new();
-        let results = sqlx::query(r#"SELECT peerid, peer_name, pubkey, static_endpoint, node_type FROM peers WHERE peerid!=? AND pubkey IS NOT NULL"#)
+        let results = sqlx::query(r#"SELECT peerid, peer_name, pubkey, current_endpoint, nat_type, monitor, relay FROM peers WHERE peerid!=? AND pubkey IS NOT NULL"#)
             .bind(auth_peer.peerid)
             .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("sql error"))?;
 
@@ -277,11 +283,13 @@ impl WirespiderServerState {
                         .map_err(|_| Status::internal("Invalid pubkey"))?,
                     result.get("peer_name"),
                     result
-                        .try_get("static_endpoint")
+                        .try_get("current_endpoint")
                         .ok()
                         .and_then(|x| SocketAddr::from_str(x).ok()), //TODO: use current endpoint IP if connected via wireguard to server
                     allowed_ips,
-                    result.get("node_type"),
+                    result.get("monitor"),
+                    result.get("relay"),
+                    result.get("nat_type"),
                 ),
             ));
         }
@@ -316,7 +324,7 @@ impl WirespiderServerState {
 
     #[instrument]
     async fn get_allowed_ips(&self, peerid: i64) -> Result<Vec<IpNet>, Status> {
-        let results = sqlx::query(r#"SELECT a.ip_address, p.node_type, n.network FROM addresses a LEFT JOIN networks n USING(networkid) LEFT JOIN peers p USING(peerid) WHERE a.peerid=?"#)
+        let results = sqlx::query(r#"SELECT a.ip_address, p.nat_type, p.monitor, p.relay, n.network FROM addresses a LEFT JOIN networks n USING(networkid) LEFT JOIN peers p USING(peerid) WHERE a.peerid=?"#)
             .bind(peerid)
             .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
         let mut final_addresses = Vec::new();
@@ -326,19 +334,18 @@ impl WirespiderServerState {
             let address = IpAddr::from_str(result.get("ip_address"))
                 .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
             if net.contains(&address) {
-                match result.get::<i32, &str>("node_type").try_into().map_err(|_| Status::internal("invalid NodeType state"))? {
-                    NodeType::Relay | NodeType::Relaymonitor => final_addresses.push(net),
-                    _ => {
-                        final_addresses.push(match (&net, &address) {
-                            (IpNet::V4(_net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, 32)
-                                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                                .into(),
-                            (IpNet::V6(_net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, 128)
-                                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                                .into(),
-                            _ => unreachable!(),
-                        });
-                    }
+                if result.get("monitor") || result.get("relay") {
+                    final_addresses.push(net)
+                } else {
+                    final_addresses.push(match (&net, &address) {
+                        (IpNet::V4(_net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, 32)
+                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                            .into(),
+                        (IpNet::V6(_net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, 128)
+                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                            .into(),
+                        _ => unreachable!(),
+                    });
                 }
             }
         }
@@ -376,16 +383,28 @@ impl Wirespider for WirespiderServerState {
         let mut auth_peer = self.authenticate(request.metadata(), 0).await?;
         let mut updated = false;
 
-        let requested_node_type = request.get_ref().node_type.try_into().map_err(|_| Status::invalid_argument("Invalid NodeType"))?;
-        match requested_node_type {
-            NodeType::Default | NodeType::Nat | NodeType::Needrelay => {},
-            NodeType::Monitor => if auth_peer.permissions < 25 {return Err(Status::permission_denied("Not allowed to monitor"))},
-            NodeType::Relay | NodeType::Relaymonitor => if auth_peer.permissions < 50 {return Err(Status::permission_denied("Not allowed to relay"))},
+        let requested_nat_type = NatType::from_i32(request.get_ref().nat_type).ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
+        let requested_node_flags = request.get_ref().node_flags.as_ref().ok_or_else(|| Status::invalid_argument("Invalid NodeType"))?;
+        if requested_node_flags.monitor && auth_peer.permissions < 25 {
+            return Err(Status::permission_denied("Not allowed to monitor"));
+        }
+        if requested_node_flags.relay && auth_peer.permissions < 50 {
+            return Err(Status::permission_denied("Not allowed to relay"));
         }
 
-        if auth_peer.node_type != requested_node_type.into() {
+        if auth_peer.nat_type != requested_nat_type.into() {
             updated = true;
-            auth_peer.node_type = requested_node_type.into();
+            auth_peer.nat_type = requested_nat_type.into();
+        }
+
+        if auth_peer.monitor != requested_node_flags.monitor {
+            updated = true;
+            auth_peer.monitor = requested_node_flags.monitor;
+        }
+
+        if auth_peer.relay != requested_node_flags.relay {
+            updated = true;
+            auth_peer.relay = requested_node_flags.relay;
         }
 
         if request.get_ref().wg_public_key.len() != 32 {
@@ -418,9 +437,11 @@ impl Wirespider for WirespiderServerState {
                 self.send_peer_event(EventType::Deleted, peer.clone()).await;
             }
             //update database
-            sqlx::query(r#"UPDATE peers SET pubkey=?, node_type=? WHERE peerid=?"#)
+            sqlx::query(r#"UPDATE peers SET pubkey=?, nat_type=?, relay=?, monitor=?  WHERE peerid=?"#)
                 .bind(&publickey[0..32])
-                .bind(auth_peer.node_type)
+                .bind(auth_peer.nat_type)
+                .bind(auth_peer.relay)
+                .bind(auth_peer.monitor)
                 .bind(auth_peer.peerid)
                 .execute(&self.sqlite_pool)
                 .await
@@ -676,7 +697,7 @@ impl Wirespider for WirespiderServerState {
                 let sockaddr: SocketAddr = endpoint
                     .try_into()
                     .map_err(|_| Status::invalid_argument("invalid endpoint"))?;
-                sqlx::query(r#"UPDATE peers SET static_endpoint=? WHERE peerid=?"#)
+                sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
                     .bind(sockaddr.to_string())
                     .bind(peerid)
                     .execute(&self.sqlite_pool)

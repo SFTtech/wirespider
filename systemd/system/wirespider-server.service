@@ -6,8 +6,8 @@ User=wirespider
 Type=simple
 Restart=on-failure
 Environment=DATABASE_URL=sqlite:/var/lib/wirespider/config.sqlite
-ExecStartPre=/usr/local/bin/wirespider server manage migrate
-ExecStart=/usr/local/bin/wirespider server run --bind 127.0.0.1:49582
+ExecStartPre=/usr/bin/wirespider server manage migrate
+ExecStart=/usr/bin/wirespider server run --bind 127.0.0.1:49582
 
 [Install]
 WantedBy=multi-user.target

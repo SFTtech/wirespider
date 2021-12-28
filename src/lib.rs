@@ -5,26 +5,11 @@ pub mod protocol {
     tonic::include_proto!("wirespider"); // The string specified here must match the proto package name
 
     use std::net::SocketAddr;
-    use std::{convert::{TryInto, TryFrom}, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
+    use std::{convert::TryInto, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
     use ipnet::{IpNet, Ipv4Net, Ipv6Net};
     use tonic::Status;
     use crate::WireguardKey;
-
-    impl TryFrom<i32> for NodeType {
-        type Error = ();
     
-        fn try_from(v: i32) -> Result<Self, Self::Error> {
-            match v {
-                x if x == NodeType::Default as i32 => Ok(NodeType::Default),
-                x if x == NodeType::Nat as i32 => Ok(NodeType::Nat),
-                x if x == NodeType::Needrelay as i32 => Ok(NodeType::Needrelay),
-                x if x == NodeType::Monitor as i32 => Ok(NodeType::Monitor),
-                x if x == NodeType::Relay as i32 => Ok(NodeType::Relay),
-                x if x == NodeType::Relaymonitor as i32 => Ok(NodeType::Relaymonitor),
-                _ => Err(()),
-            }
-        }
-    }
 
     impl TryInto<IpAddr> for &Ip {
         type Error = Status;
@@ -138,13 +123,14 @@ pub mod protocol {
     }
 
     impl Peer {
-        pub fn new(pub_key: WireguardKey, name: String, endpoint: Option<SocketAddr>, allowed_ips: Vec<IpNet>, node_type: i32) -> Peer {
+        pub fn new(pub_key: WireguardKey, name: String, endpoint: Option<SocketAddr>, allowed_ips: Vec<IpNet>, monitor: bool, relay: bool, nat_type: i32) -> Peer {
             Peer {
                 wg_public_key: pub_key.to_vec(),
                 name,
                 endpoint: endpoint.map(|x| peer::Endpoint::Addr(Endpoint::from(x))),
                 allowed_ips: allowed_ips.into_iter().map(Network::from).collect(),
-                node_type
+                node_flags: Some(NodeFlags {monitor, relay}),
+                nat_type
             }
         }
 

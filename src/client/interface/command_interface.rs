@@ -4,6 +4,7 @@ use std::{net::SocketAddr, num::NonZeroU16, process::Command};
 use ipnet::IpNet;
 use tempfile::NamedTempFile;
 use base64::encode;
+use tracing::debug;
 use wirespider::WireguardKey;
 
 pub struct CommandLineInterface {
@@ -19,7 +20,7 @@ impl ManagementInterface for CommandLineInterface {
             .args(&["link", "add", &device_name, "type", "wireguard"])
             .output()
             .expect("failed to execute process");
-        println!("{:?}", output);
+        debug!("{:?}", output);
 
         let mut args = vec!["set", &device_name];
         let str_port ;
@@ -38,7 +39,7 @@ impl ManagementInterface for CommandLineInterface {
                 .output()
                 .expect("failed to execute wireguard. Please make sure wireguard is installed");
         
-        println!("{:?}", output);
+        debug!("{:?}", output);
 
         for address in addresses {
             let ip_str = address.to_string();
@@ -46,14 +47,14 @@ impl ManagementInterface for CommandLineInterface {
                 .args(&["address", "add", "dev", &device_name, &ip_str])
                 .output()
                 .expect("failed to execute process");
-            println!("{:?}", output);
+            debug!("{:?}", output);
         }
 
         let output = Command::new("ip")
             .args(&["link", "set", &device_name, "up"])
             .output()
             .expect("failed to execute process");
-        println!("{:?}", output);
+        debug!("{:?}", output);
 
         Ok(CommandLineInterface {
             device_name
@@ -91,8 +92,8 @@ impl ManagementInterface for CommandLineInterface {
                 .args(&args)
                 .output()
                 .expect("failed to execute process");
-        println!("wg {:?}", args);
-        println!("{:?}", output);
+        debug!("wg {:?}", args);
+        debug!("{:?}", output);
         Ok(())
     }
 
@@ -105,7 +106,7 @@ impl ManagementInterface for CommandLineInterface {
                 .args(&args)
                 .output()
                 .expect("failed to execute process");
-        println!("{:?}", output);
+        debug!("{:?}", output);
         Ok(())
     }
 
@@ -118,7 +119,7 @@ impl ManagementInterface for CommandLineInterface {
             .args(&args)
             .output()
             .expect("failed to execute process");
-            println!("{:?}", output);
+            debug!("{:?}", output);
         Ok(())
     }
 
@@ -132,7 +133,7 @@ impl ManagementInterface for CommandLineInterface {
             .output()
             .expect("failed to execute process");
 
-        println!("{:?}", output);
+        debug!("{:?}", output);
         Ok(())
     }
 
@@ -141,11 +142,19 @@ impl ManagementInterface for CommandLineInterface {
             .args(&["link", "set", &self.device_name, "down"])
             .output()
             .expect("failed to execute process");
-        println!("{:?}", output);
+        debug!("{:?}", output);
         let output = Command::new("ip")
             .args(&["link", "del", &self.device_name])
             .output()
             .expect("failed to execute process");
-        println!("{:?}", output);
+        debug!("{:?}", output);
+    }
+
+    fn delete_device_if_exists(device_name: &str) {
+        let output = Command::new("ip")
+        .args(&["link", "del", &device_name])
+        .output()
+        .expect("failed to execute process");
+        debug!("{:?}", output);
     }
 }

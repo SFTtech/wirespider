@@ -5,7 +5,7 @@ Wirespider consists of a server and a client. The server is responsible of pushi
 ## How to run the client
 ```
 cargo build --release
-sudo cp target/release/wirespider /usr/local/bin
+sudo cp target/release/wirespider /usr/bin
 sudo mkdir -p /etc/wirespider/keys
 sudo cp systemd/system/wirespider-client@.service /etc/systemd/system
 # rename file to any other device name here
@@ -21,15 +21,23 @@ sudo systemctl enable --now wirespider-client@wg0.service
 ```
 # same binary as the client
 cargo build --release
-sudo cp target/release/wirespider /usr/local/bin
+sudo cp target/release/wirespider /usr/bin
 # create a wirespider system user
-sudo adduser --system --group --home /var/lib/wirespider wirespider 
+sudo adduser --system --group --home /var/lib/wirespider wirespider
+
+# create database
+wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage migrate
+# create a ip network for the clients
+wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage network create 10.1.2.0/24
+# change ip to the ip used by this admin peer
+wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage create-admin admin 10.1.2.1/24
 
 sudo cp systemd/system/wirespider-server.service /etc/systemd/system
 # enable auto start and start the server
 sudo systemctl enable --now wirespider-server.service
 ```
 
+The admin can now use the `wirespider client manage` commands to create other peers and routes
 
 ### Contact
 

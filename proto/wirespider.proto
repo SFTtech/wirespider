@@ -18,7 +18,9 @@ service Wirespider {
 
 message AddressRequest {
     bytes wg_public_key = 1;
-    NodeType node_type = 2;
+    Endpoint endpoint = 2;
+    NodeFlags node_flags = 3;
+    NatType nat_type = 4;
 }
 
 message AddressReply {
@@ -86,13 +88,17 @@ enum EventType {
     DELETED = 2;
 }
 
-enum NodeType {
-    DEFAULT = 0;
-    NAT = 1;
-    NEEDRELAY = 2;
-    MONITOR = 3;
-    RELAY = 4;
-    RELAYMONITOR = 5;
+message NodeFlags {
+    bool monitor = 1;
+    bool relay = 2;
+}
+
+enum NatType {
+    NO_NAT = 0;
+    FULL_CONE = 1;
+    RESTRICTED_CONE = 2;
+    PORT_RESTRICTED_CONE = 3;
+    SYMMETRIC = 4;
 }
 
 message Event {
@@ -111,7 +117,8 @@ message Peer {
     }
     repeated Network allowed_ips = 3;
     string name = 4;
-    NodeType node_type = 5;
+    NodeFlags node_flags = 5;
+    NatType nat_type = 6;
 }
 
 message Endpoint {
