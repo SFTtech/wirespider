@@ -1,6 +1,6 @@
 [package]
 name = "wirespider"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Linus Karl <linus@lotz.li>"]
 license = "GPL-3"
 edition = "2021"
@@ -15,7 +15,7 @@ lazy_static = "1.4.0"
 
 #wireguard
 x25519-dalek-ng = "1.1"
-wireguard-uapi = {git = "https://github.com/gluxon/wireguard-uapi-rs"}
+wireguard-uapi = "2.0.2"
 
 # grpc
 tonic = { version = "0.6.2", features = ["tls", "tls-webpki-roots"]}
