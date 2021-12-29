@@ -61,4 +61,11 @@ tonic-build = { version = "0.6" }
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
-systemd-units = { enable = false, start = false, unit-scripts= "systemd/system/", unit-name = "wirespider-server" }
+assets = [
+    ["target/release/wirespider", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/wirespider/README", "644"],
+    ["CHANGELOG.md", "usr/share/doc/wirespider/CHANGELOG", "644"],
+    ["systemd/system/wirespider-client@.service", "lib/systemd/system/", "644"],
+    ["systemd/system/wirespider-server.service", "lib/systemd/system/", "644"],
+    ["systemd/wirespider/wg0", "etc/wirespider/", "644"],
+]
