@@ -24,8 +24,6 @@ use tracing::instrument;
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::NatType;
 
-const STUN_SERVER: &str = "stun.stunprotocol.org:3478";
-
 #[derive(Debug, PartialEq)]
 enum NatMapping {
     NoNat,
@@ -42,9 +40,9 @@ enum NatFiltering {
 }
 
 #[instrument]
-pub async fn get_nat_type(port: NonZeroU16) -> Result<(Option<SocketAddr>, NatType), ()> {
+pub async fn get_nat_type(stun_host: &str, port: NonZeroU16) -> Result<(Option<SocketAddr>, NatType), ()> {
     debug!("getting nat type");
-    let stun_host = lookup_host(STUN_SERVER)
+    let stun_host = lookup_host(stun_host)
         .await
         .or(Err(()))?
         .find(|x| x.is_ipv4())
@@ -268,6 +266,6 @@ async fn get_nat_filtering_behaviour(
 
 #[tokio::test]
 async fn test_nat_behaviour() {
-    let result = get_nat_type(NonZeroU16::new(51820).unwrap()).await.unwrap();
+    let result = get_nat_type("stun.stunprotocol.org:3478", NonZeroU16::new(51820).unwrap()).await.unwrap();
     println!("Got address: {:?}, Nat type: {:?}", result.0, result.1);
 }
