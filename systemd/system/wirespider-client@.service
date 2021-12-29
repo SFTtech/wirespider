@@ -1,6 +1,8 @@
 [Unit]
 Description=Wirespider client for device %i
 After=wirespider-server.service
+StartLimitIntervalSec=10
+StartLimitBurst=1
 
 [Service]
 Type=simple

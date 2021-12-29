@@ -1,5 +1,7 @@
 [Unit]
 Description=wirespider sync server
+StartLimitIntervalSec=60
+StartLimitBurst=1
 
 [Service]
 User=wirespider
