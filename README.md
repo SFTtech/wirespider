@@ -2,6 +2,13 @@
 
 Wirespider consists of a server and a client. The server is responsible of pushing the wireguard configuration and routes to the clients and helping with NAT hole punching. The client listens for configuration changes, and modifies the wireguard configuration and routes accordingly.
 
+## Features
+* Distribute Wireguard tunnel configuration
+* Distribute routes to all clients
+* RFC 5780 NAT detection
+* NAT hole punching or relay over other nodes when not possible
+
+
 ## How to run the client
 ```
 cargo build --release
