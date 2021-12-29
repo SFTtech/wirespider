@@ -28,7 +28,7 @@ sudo systemctl enable --now wirespider-client@wg0.service
 ```
 # same binary as the client
 cargo build --release
-sudo cp target/release/wirespider /usr/bin
+sudo cp target/release/wirespider /usr/local/bin
 # create a wirespider system user
 sudo adduser --system --group --home /var/lib/wirespider wirespider
 

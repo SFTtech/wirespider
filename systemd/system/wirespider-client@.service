@@ -7,6 +7,7 @@ StartLimitBurst=1
 [Service]
 Type=simple
 Restart=on-failure
+RestartSec=5
 EnvironmentFile=/etc/wirespider/%i
 ExecStart=/usr/bin/wirespider client start --device %i
 
