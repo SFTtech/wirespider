@@ -33,6 +33,8 @@ use x25519_dalek_ng::{PublicKey, StaticSecret};
 
 use interface::DefaultInterface;
 
+use tracing::error;
+
 use crate::client::nat::get_nat_type;
 
 lazy_static! {
@@ -245,7 +247,15 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                     })
                     .await?
                     .into_inner();
-                while let Some(event) = events_stream.try_next().await? {
+                loop {
+                    let event = match events_stream.try_next().await {
+                        Ok(Some(event)) => event,
+                        Err(error) => {
+                            error!("got error in main loop: {}", error);
+                            break;
+                        }
+                        _ => break,
+                    };
                     println!("Event: {:?}", &event);
                     CLIENT_STATE.update(&event).await;
                     let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
