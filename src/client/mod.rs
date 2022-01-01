@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 use std::{convert::TryInto, net::IpAddr, num::NonZeroU16};
 
 mod client_state;
@@ -6,6 +7,7 @@ mod interface;
 mod monitor;
 mod nat;
 
+use backoff::future::retry;
 use base64::{decode, encode};
 use clap::Parser;
 use clap::{ArgGroup, Args, Subcommand, ValueHint};
@@ -165,7 +167,9 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let mut rng = OsRng::default();
-    let endpoint = Endpoint::from(opt.endpoint);
+    let endpoint = Endpoint::from(opt.endpoint)
+        .keep_alive_while_idle(true)
+        .http2_keep_alive_interval(Duration::from_secs(25*60));
     let channel = endpoint.connect().await?;
     let token = MetadataValue::from_str(format!("Bearer {}", opt.token).as_str())?;
     let mut client = WirespiderClient::with_interceptor(channel, move |mut req: Request<()>| {
@@ -176,13 +180,21 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Start(start_opts) => {
             // delete the existing device, so we do not disturb the nat detection
             DefaultInterface::delete_device_if_exists(&start_opts.device);
+            let backoff= backoff::ExponentialBackoffBuilder::new()
+                .with_max_interval(Duration::from_secs(60))
+                .build();
 
             let port = start_opts
                 .port
                 .unwrap_or_else(|| rng.gen_range(49192..=65535).try_into().unwrap());
+
+            let nat_backoff = backoff.clone();
             let nat_detection = tokio::spawn(async move {
+                let backoff = nat_backoff.clone();
                 let stun_host = start_opts.stun_host.clone();
-                get_nat_type(&stun_host, port).await
+                retry(backoff, || async {
+                    get_nat_type(&stun_host, port).await.map_err(|x| x.into())
+                }).await
             });
 
             let private_key = if std::path::Path::new(&start_opts.private_key).exists() {
@@ -210,7 +222,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
             let address_list = client
                 .get_addresses(AddressRequest {
                     wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
-                    nat_type: nat_type as i32,
+                    nat_type: nat_type.into(),
                     node_flags: Some(NodeFlags {
                         monitor: start_opts.monitor,
                         relay: start_opts.relay,
@@ -241,12 +253,13 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
             });
             let mut event_counter = 0;
             loop {
-                let mut events_stream = client
-                    .get_events(EventsRequest {
-                        start_event: event_counter,
-                    })
-                    .await?
-                    .into_inner();
+                let backoff = backoff.clone();
+                let mut events_stream = retry(backoff, || async {
+                        client.clone()
+                        .get_events(EventsRequest {
+                            start_event: event_counter,
+                        }).await.map_err(|x| x.into())
+                }).await?.into_inner();
                 loop {
                     let event = match events_stream.try_next().await {
                         Ok(Some(event)) => event,

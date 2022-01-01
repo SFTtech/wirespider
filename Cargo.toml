@@ -44,6 +44,9 @@ stun_codec = "0.1.13"
 bytecodec = "0.4.15"
 trackable = "1.2.0"
 
+# retry
+backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
+
 [build-dependencies]
 tonic-build = { version = "0.6" }
 
