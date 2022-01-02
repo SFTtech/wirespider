@@ -31,7 +31,7 @@ impl Monitor {
         T::Error: Into<StdError>,
         <T::ResponseBody as Body>::Error: Into<StdError> + Send,
     {
-        let mut stream = IntervalStream::new(interval(Duration::from_millis(10)));
+        let mut stream = IntervalStream::new(interval(Duration::from_secs(1)));
         while stream.next().await.is_some() {
             let interface = self.interface.clone();
             let device = task::spawn_blocking(move || {
