@@ -246,11 +246,13 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
             )
             .expect("Could not set up wireguard device");
 
-            let monitor = monitor::Monitor::new(start_opts.device.clone());
-            let mut monitor_client = client.clone();
-            tokio::spawn(async move {
-                monitor.monitor(&CLIENT_STATE, &mut monitor_client).await;
-            });
+            if start_opts.monitor {
+                let monitor = monitor::Monitor::new(start_opts.device.clone());
+                let mut monitor_client = client.clone();
+                tokio::spawn(async move {
+                    monitor.monitor(&CLIENT_STATE, &mut monitor_client).await;
+                });
+            }
             let mut event_counter = 0;
             loop {
                 let backoff = backoff.clone();
