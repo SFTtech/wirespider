@@ -186,7 +186,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
 
             let port = start_opts
                 .port
-                .unwrap_or_else(|| rng.gen_range(49192..=65535).try_into().unwrap());
+                .unwrap_or_else(|| rng.gen_range(49152..=65535).try_into().unwrap());
 
             let nat_backoff = backoff.clone();
             let nat_detection = tokio::spawn(async move {
