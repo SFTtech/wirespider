@@ -35,7 +35,7 @@ use x25519_dalek_ng::{PublicKey, StaticSecret};
 
 use interface::DefaultInterface;
 
-use tracing::error;
+use tracing::{error, debug};
 
 use crate::client::nat::get_nat_type;
 
@@ -271,7 +271,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                         _ => break,
                     };
-                    println!("Event: {:?}", &event);
+                    debug!("Event: {:?}", &event);
                     CLIENT_STATE.update(&event).await;
                     let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
                     match event.target {
@@ -349,7 +349,12 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                             println!("Got invalid event target: {:?}", event.target);
                         }
                     }
-                    event_counter = event.id;
+                    if event_counter < event.id {
+                        event_counter = event.id;
+                    }
+                    if event_counter == 0 {
+                        event_counter = 1;
+                    }                    
                 }
             }
         }
