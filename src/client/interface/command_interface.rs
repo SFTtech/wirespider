@@ -133,7 +133,7 @@ impl ManagementInterface for CommandLineInterface {
             .addresses
             .iter()
             .find(|x| via.is_ipv4() == x.addr().is_ipv4())
-            .map(|x| x.to_string())
+            .map(|x| x.addr().to_string())
             .unwrap_or_default();
         let mut cmd_args = vec!["route", "add", net_str.as_str(), "via", via_str.as_str()];
         if !src_str.is_empty() {
