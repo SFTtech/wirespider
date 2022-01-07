@@ -36,8 +36,10 @@ sudo adduser --system --group --home /var/lib/wirespider wirespider
 wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage migrate
 # create a ip network for the clients
 wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage network create 10.1.2.0/24
-# change ip to the ip used by this admin peer
+# add admin with ip in this new network
+# the command will return a token you can use with wirespider client
 wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage create-admin admin 10.1.2.1/24
+
 
 sudo cp systemd/system/wirespider-server.service /etc/systemd/system
 # enable auto start and start the server
