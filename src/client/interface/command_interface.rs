@@ -1,20 +1,26 @@
 use super::interface_trait::ManagementInterface;
 
-use std::{net::SocketAddr, num::NonZeroU16, process::Command};
-use ipnet::IpNet;
-use tempfile::NamedTempFile;
 use base64::encode;
+use ipnet::IpNet;
+use std::{net::SocketAddr, num::NonZeroU16, process::Command};
+use tempfile::NamedTempFile;
 use tracing::debug;
 use wirespider::WireguardKey;
 
 pub struct CommandLineInterface {
-    device_name: String
+    device_name: String,
+    addresses: Vec<IpNet>,
 }
 
 impl ManagementInterface for CommandLineInterface {
     type Error = ();
 
-    fn create_device(device_name: String, privkey: WireguardKey, port: Option<NonZeroU16>, addresses: Vec<IpNet>) -> Result<Self,Self::Error> {
+    fn create_device(
+        device_name: String,
+        privkey: WireguardKey,
+        port: Option<NonZeroU16>,
+        addresses: Vec<IpNet>,
+    ) -> Result<Self, Self::Error> {
         // create interface
         let output = Command::new("ip")
             .args(&["link", "add", &device_name, "type", "wireguard"])
@@ -23,7 +29,7 @@ impl ManagementInterface for CommandLineInterface {
         debug!("{:?}", output);
 
         let mut args = vec!["set", &device_name];
-        let str_port ;
+        let str_port;
         if let Some(port) = port {
             str_port = port.to_string();
             args.push("listen-port");
@@ -35,13 +41,13 @@ impl ManagementInterface for CommandLineInterface {
         args.push(file.path().to_str().ok_or(())?);
 
         let output = Command::new("wg")
-                .args(&args)
-                .output()
-                .expect("failed to execute wireguard. Please make sure wireguard is installed");
-        
+            .args(&args)
+            .output()
+            .expect("failed to execute wireguard. Please make sure wireguard is installed");
+
         debug!("{:?}", output);
 
-        for address in addresses {
+        for address in &addresses {
             let ip_str = address.to_string();
             let output = Command::new("ip")
                 .args(&["address", "add", "dev", &device_name, &ip_str])
@@ -57,11 +63,18 @@ impl ManagementInterface for CommandLineInterface {
         debug!("{:?}", output);
 
         Ok(CommandLineInterface {
-            device_name
+            device_name,
+            addresses,
         })
     }
 
-    fn set_peer(&self, pubkey: WireguardKey, endpoint: Option<SocketAddr>, persistent_keepalive: Option<NonZeroU16>, allowed_ips: &[IpNet]) -> Result<(),Self::Error> {
+    fn set_peer(
+        &self,
+        pubkey: WireguardKey,
+        endpoint: Option<SocketAddr>,
+        persistent_keepalive: Option<NonZeroU16>,
+        allowed_ips: &[IpNet],
+    ) -> Result<(), Self::Error> {
         let mut args = vec!["set", &self.device_name, "peer"];
         let str_pubkey = encode(pubkey);
         args.push(&str_pubkey);
@@ -83,47 +96,59 @@ impl ManagementInterface for CommandLineInterface {
         let str_allowed_ips;
         if !allowed_ips.is_empty() {
             args.push("allowed-ips");
-            str_allowed_ips = allowed_ips.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(",");
+            str_allowed_ips = allowed_ips
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<String>>()
+                .join(",");
             args.push(&str_allowed_ips);
         }
 
-
         let output = Command::new("wg")
-                .args(&args)
-                .output()
-                .expect("failed to execute process");
+            .args(&args)
+            .output()
+            .expect("failed to execute process");
         debug!("wg {:?}", args);
         debug!("{:?}", output);
         Ok(())
     }
 
-    fn remove_peer(&self, pubkey: wirespider::WireguardKey) -> Result<(),Self::Error> {
+    fn remove_peer(&self, pubkey: wirespider::WireguardKey) -> Result<(), Self::Error> {
         let mut args = vec!["set", &self.device_name, "peer"];
         let str_pubkey = encode(pubkey);
         args.push(&str_pubkey);
         args.push("remove");
         let output = Command::new("wg")
-                .args(&args)
-                .output()
-                .expect("failed to execute process");
+            .args(&args)
+            .output()
+            .expect("failed to execute process");
         debug!("{:?}", output);
         Ok(())
     }
 
-    fn add_route(&self, network: IpNet, via: std::net::IpAddr) -> Result<(),Self::Error> {
+    fn add_route(&self, network: IpNet, via: std::net::IpAddr) -> Result<(), Self::Error> {
         let net_str = network.to_string();
         let via_str = via.to_string();
-        let args = ["route", "add", net_str.as_str(), "via", via_str.as_str()];
+        let src_str = self
+            .addresses
+            .iter()
+            .find(|x| via.is_ipv4() == x.addr().is_ipv4())
+            .map(|x| x.to_string())
+            .unwrap_or_default();
+        let mut cmd_args = vec!["route", "add", net_str.as_str(), "via", via_str.as_str()];
+        if !src_str.is_empty() {
+            cmd_args.extend_from_slice(&["src", src_str.as_str()]);
+        }
 
         let output = Command::new("ip")
-            .args(&args)
+            .args(&cmd_args)
             .output()
             .expect("failed to execute process");
-            debug!("{:?}", output);
+        debug!("{:?}", output);
         Ok(())
     }
 
-    fn remove_route(&self, network: IpNet, via: std::net::IpAddr) -> Result<(),Self::Error> {
+    fn remove_route(&self, network: IpNet, via: std::net::IpAddr) -> Result<(), Self::Error> {
         let net_str = network.to_string();
         let via_str = via.to_string();
         let args = ["route", "del", net_str.as_str(), "via", via_str.as_str()];
@@ -152,9 +177,9 @@ impl ManagementInterface for CommandLineInterface {
 
     fn delete_device_if_exists(device_name: &str) {
         let output = Command::new("ip")
-        .args(&["link", "del", device_name])
-        .output()
-        .expect("failed to execute process");
+            .args(&["link", "del", device_name])
+            .output()
+            .expect("failed to execute process");
         debug!("{:?}", output);
     }
 }
