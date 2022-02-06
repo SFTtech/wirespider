@@ -2,7 +2,7 @@ use std::{net::SocketAddr, str::FromStr};
 
 use crate::server::protocol::WirespiderServerState;
 
-use clap::{Parser, Args, Subcommand};
+use clap::{Parser, Args, Subcommand, ArgEnum};
 
 use std::{collections::HashMap, env};
 
@@ -27,7 +27,6 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 
 #[derive(Debug, Args)]
 pub struct RunCommand {
-    // 
     #[clap(short, long, default_value="0.0.0.0:49582")]
     pub bind: SocketAddr,
 }
@@ -47,8 +46,22 @@ pub enum ManageCommand {
 #[derive(Debug, Subcommand)]
 #[clap(rename_all="snake")]
 pub enum NetworkCommand {
-    Create(ParamIPNet),
+    Create(CreateNetworkCommand),
     Delete(ParamIPNet),
+}
+
+#[derive(Debug, Args)]
+#[clap(rename_all="snake")]
+pub struct CreateNetworkCommand {
+    network: IpNet,
+    #[clap(arg_enum, default_value_t = NetworkType::Wireguard)]
+    network_type: NetworkType,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, ArgEnum, Debug)]
+enum NetworkType {
+    Wireguard,
+    Vxlan,
 }
 
 #[derive(Debug, Args)]
@@ -148,12 +161,16 @@ impl ServerCli {
                         Ok(())
                     }
                     ManageCommand::Network(NetworkCommand::Create(x)) => {
+                        let network_type = match x.network_type {
+                            NetworkType::Vxlan => "vxlan",
+                            NetworkType::Wireguard => "wireguard",
+                        };
                         let query = sqlx::query(r#"
-                            INSERT INTO networks (network, ipv6)
-                            VALUES (?, ?)
+                            INSERT INTO networks (network_type, network, ipv6)
+                            VALUES (?, ?, ?)
                         "#
-                        );
-                        match x.ipnet {
+                        ).bind(network_type);
+                        match x.network {
                             IpNet::V4(x) => {
                                 query.bind(x.to_string()).bind(false).execute(&pool).await?;
                             }
@@ -161,7 +178,7 @@ impl ServerCli {
                                 query.bind(x.to_string()).bind(true).execute(&pool).await?;
                             }
                         }
-                        println!("Created network {}", x.ipnet);
+                        println!("Created network {}", x.network);
                         Ok(())
                     }
                     ManageCommand::Network(NetworkCommand::Delete(x)) => {

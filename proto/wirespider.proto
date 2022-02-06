@@ -25,6 +25,7 @@ message AddressRequest {
 
 message AddressReply {
     repeated Network address = 1;
+    repeated Network overlay_ips = 2;
 }
 
 message PeersRequest {}
@@ -119,6 +120,8 @@ message Peer {
     string name = 4;
     NodeFlags node_flags = 5;
     NatType nat_type = 6;
+    repeated Network overlay_ips = 7;
+    repeated IP tunnel_ips = 8;
 }
 
 message Endpoint {

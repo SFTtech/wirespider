@@ -12,8 +12,9 @@ use base64::{decode, encode};
 use clap::Parser;
 use clap::{ArgGroup, Args, Subcommand, ValueHint};
 use client_state::ClientState;
+use eui48::MacAddress;
 use futures::TryStreamExt;
-use interface::ManagementInterface;
+use interface::{WireguardManagementInterface, OverlayManagementInterface, DefaultWireguardInterface, DefaultOverlayInterface};
 use ipnet::IpNet;
 use peer_identifier::Identifier;
 use rand::rngs::OsRng;
@@ -32,8 +33,6 @@ use uuid::Uuid;
 use wirespider::protocol::*;
 use wirespider::{protocol::wirespider_client::WirespiderClient, WireguardKey};
 use x25519_dalek_ng::{PublicKey, StaticSecret};
-
-use interface::DefaultInterface;
 
 use tracing::{error, debug};
 
@@ -72,18 +71,20 @@ enum Command {
 struct StartCommand {
     #[clap(required = true, short, long, env = "WS_DEVICE")]
     device: String,
-    #[clap(short, long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY")]
+    #[clap(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY")]
     private_key: String,
-    #[clap(short, long, env = "WS_NODE_MONITOR")]
+    #[clap(long, env = "WS_NODE_MONITOR")]
     monitor: bool,
-    #[clap(short, long, env = "WS_NODE_RELAY")]
+    #[clap(long, env = "WS_NODE_RELAY")]
     relay: bool,
-    #[clap(short, long, default_value = "25", env = "WS_KEEP_ALIVE")]
+    #[clap(long, default_value = "25", env = "WS_KEEP_ALIVE")]
     keep_alive: NonZeroU16,
     #[clap(short, long, env = "WS_LISTEN_PORT")]
     port: Option<NonZeroU16>,
-    #[clap(short, long, env = "WS_STUN_HOST", default_value = "stun.stunprotocol.org:3478")]
+    #[clap(long, env = "WS_STUN_HOST", default_value = "stun.stunprotocol.org:3478")]
     stun_host: String,
+    #[clap(long, env = "WS_FIXED_ENDPOINT")]
+    fixed_endpoint: Option<SocketAddr>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -179,7 +180,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
     match opt.command {
         Command::Start(start_opts) => {
             // delete the existing device, so we do not disturb the nat detection
-            DefaultInterface::delete_device_if_exists(&start_opts.device);
+            DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
             let backoff= backoff::ExponentialBackoffBuilder::new()
                 .with_max_interval(Duration::from_secs(60))
                 .build();
@@ -188,13 +189,19 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                 .port
                 .unwrap_or_else(|| rng.gen_range(49152..=65535).try_into().unwrap());
 
+            let device_name = start_opts.device;
+
             let nat_backoff = backoff.clone();
             let nat_detection = tokio::spawn(async move {
-                let backoff = nat_backoff.clone();
-                let stun_host = start_opts.stun_host.clone();
-                retry(backoff, || async {
-                    get_nat_type(&stun_host, port).await.map_err(|x| x.into())
-                }).await
+                if let Some(endpoint) = start_opts.fixed_endpoint {
+                    Ok((Some(endpoint), NatType::NoNat))
+                } else {
+                    let backoff = nat_backoff.clone();
+                    let stun_host = start_opts.stun_host.clone();
+                    retry(backoff, || async {
+                        get_nat_type(&stun_host, port).await.map_err(|x| x.into())
+                    }).await
+                }
             });
 
             let private_key = if std::path::Path::new(&start_opts.private_key).exists() {
@@ -219,7 +226,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                 .await
                 .unwrap_or_log()
                 .expect("Could not determine NAT, are you connected to the internet?");
-            let address_list = client
+            let address_reply = client
                 .get_addresses(AddressRequest {
                     wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
                     nat_type: nat_type.into(),
@@ -231,28 +238,43 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .await?
                 .into_inner();
-            println!("{:?}", address_list);
-            let address_list = address_list
+            debug!("{:?}", address_reply);
+            let address_list: Vec<IpNet> = address_reply
                 .address
-                .into_iter()
+                .iter()
                 .map(|x| x.try_into().unwrap())
                 .collect();
 
-            let interface = DefaultInterface::create_device(
-                start_opts.device.clone(),
+            let interface = DefaultWireguardInterface::create_wireguard_device(
+                device_name.clone(),
                 private_key.to_bytes(),
                 Some(port),
-                address_list,
+                &address_list,
             )
             .expect("Could not set up wireguard device");
 
             if start_opts.monitor {
-                let monitor = monitor::Monitor::new(start_opts.device.clone());
+                let monitor = monitor::Monitor::new(device_name.clone());
                 let mut monitor_client = client.clone();
                 tokio::spawn(async move {
                     monitor.monitor(&CLIENT_STATE, &mut monitor_client).await;
                 });
             }
+
+            let overlay_address_list = address_reply
+                .overlay_ips
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect();
+            
+            let mut mac_bytes = Vec::with_capacity(6);
+            mac_bytes.push(0xaa);
+            mac_bytes.extend_from_slice(&PublicKey::from(&private_key).to_bytes()[0..5]);
+            let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+            let overlay_interface = DefaultOverlayInterface::create_overlay_device(
+                format!("{}-vxlan", device_name), &device_name, &address_list[0].addr(), overlay_address_list, mac_addr)
+                .expect("could not create overlay device");
+
             let mut event_counter = 0;
             loop {
                 let backoff = backoff.clone();
@@ -281,6 +303,11 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                                     peer::Endpoint::Addr(x) => x.try_into().unwrap(),
                                 });
                                 let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap();
+                                let mut mac_bytes = Vec::with_capacity(6);
+                                mac_bytes.push(0xaa);
+                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+
                                 let allowed_ips: Vec<IpNet> = peer
                                     .allowed_ips
                                     .into_iter()
@@ -316,6 +343,11 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                                     interface
                                         .set_peer(pubkey, endpoint, keep_alive, &allowed_ips)
                                         .unwrap();
+                                }
+                                let destination_ip = peer.tunnel_ips.into_iter().next().map(|x| x.try_into()).unwrap().unwrap();
+                                let overlay_ip = peer.overlay_ips.into_iter().next();
+                                if let Some(dest_net) = overlay_ip {
+                                    overlay_interface.set_peer(mac_addr, dest_net.try_into()?, destination_ip).unwrap();
                                 }
                             }
                             EventType::Deleted => {

@@ -5,7 +5,6 @@ use sqlx::error::Error as SqlxError;
 use sqlx::prelude::*;
 use sqlx::sqlite::SqlitePool;
 use std::borrow::BorrowMut;
-use std::{cmp, env};
 use std::{
     borrow::Borrow,
     cmp::max,
@@ -18,6 +17,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering::Relaxed},
     usize,
 };
+use std::{cmp, env};
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::RwLock;
 use tracing_unwrap::ResultExt;
@@ -114,11 +114,13 @@ impl WirespiderServerState {
         let (_, token) = auth_str.split_at(7);
         let uuid = Uuid::from_str(token)
             .map_err(|_| Status::permission_denied("Invalid authorization"))?;
-        let result = sqlx::query(r#"SELECT peerid,permissions,nat_type,monitor,relay FROM peers WHERE token=?"#)
-            .bind(uuid)
-            .fetch_one(&self.sqlite_pool)
-            .await
-            .map_err(|_| Status::permission_denied("Invalid authorization"))?;
+        let result = sqlx::query(
+            r#"SELECT peerid,permissions,nat_type,monitor,relay FROM peers WHERE token=?"#,
+        )
+        .bind(uuid)
+        .fetch_one(&self.sqlite_pool)
+        .await
+        .map_err(|_| Status::permission_denied("Invalid authorization"))?;
         if result.get::<i32, &str>("permissions") >= permission_level {
             Ok(AuthenticatedPeer {
                 peerid: result.get("peerid"),
@@ -201,11 +203,24 @@ impl WirespiderServerState {
             .get_allowed_ips(peerid)
             .await
             .map_err(|_| Status::internal("allowed IP error"))?;
+
+        let overlay_ips = self
+            .get_overlay_ips(peerid)
+            .await
+            .map_err(|_| Status::internal("allowed IP error"))?;
+
+        let tunnel_ips = self
+            .get_tunnel_ips(peerid)
+            .await
+            .map_err(|_| Status::internal("allowed IP error"))?;
+
         Ok(Some(Peer::new(
             pubkey,
             peer_data.get("peer_name"),
             endpoint,
+            tunnel_ips,
             allowed_ips,
+            overlay_ips,
             peer_data.get("monitor"),
             peer_data.get("relay"),
             peer_data.get("nat_type"),
@@ -273,6 +288,8 @@ impl WirespiderServerState {
         for result in results {
             let pubkey: Vec<u8> = result.get("pubkey");
             let allowed_ips = self.get_allowed_ips(result.get("peerid")).await?;
+            let overlay_ips = self.get_overlay_ips(result.get("peerid")).await?;
+            let tunnel_ips = self.get_tunnel_ips(result.get("peerid")).await?;
             events.push(Event::from_peer(
                 0,
                 EventType::New,
@@ -286,7 +303,9 @@ impl WirespiderServerState {
                         .try_get("current_endpoint")
                         .ok()
                         .and_then(|x| SocketAddr::from_str(x).ok()), //TODO: use current endpoint IP if connected via wireguard to server
+                    tunnel_ips,
                     allowed_ips,
+                    overlay_ips,
                     result.get("monitor"),
                     result.get("relay"),
                     result.get("nat_type"),
@@ -323,8 +342,47 @@ impl WirespiderServerState {
     }
 
     #[instrument]
+    async fn get_overlay_ips(&self, peerid: i64) -> Result<Vec<IpNet>, Status> {
+        let results = sqlx::query(r#"SELECT a.ip_address, n.network FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? AND n.network_type='vxlan'"#)
+            .bind(peerid)
+            .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
+        let mut final_addresses = Vec::new();
+        for result in results {
+            let net = IpNet::from_str(result.get("network"))
+                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?;
+            let address = IpAddr::from_str(result.get("ip_address"))
+                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
+            if net.contains(&address) {
+                final_addresses.push(match (&net, &address) {
+                    (IpNet::V4(net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, net.prefix_len())
+                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                        .into(),
+                    (IpNet::V6(net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, net.prefix_len())
+                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                        .into(),
+                    _ => unreachable!(),
+                });
+            }
+        }
+        Ok(final_addresses)
+    }
+
+    #[instrument]
+    async fn get_tunnel_ips(&self, peerid: i64) -> Result<Vec<IpAddr>, Status> {
+        let results = sqlx::query(r#"SELECT ip_address FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? AND n.network_type='wireguard'"#)
+            .bind(peerid)
+            .fetch_all(&self.sqlite_pool)
+            .await
+            .map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
+        Ok(results
+            .into_iter()
+            .map(|x| IpAddr::from_str(x.get("ip_address")).unwrap_or_log())
+            .collect())
+    }
+
+    #[instrument]
     async fn get_allowed_ips(&self, peerid: i64) -> Result<Vec<IpNet>, Status> {
-        let results = sqlx::query(r#"SELECT a.ip_address, p.nat_type, p.monitor, p.relay, n.network FROM addresses a LEFT JOIN networks n USING(networkid) LEFT JOIN peers p USING(peerid) WHERE a.peerid=?"#)
+        let results = sqlx::query(r#"SELECT a.ip_address, p.nat_type, p.monitor, p.relay, n.network FROM addresses a LEFT JOIN networks n USING(networkid) LEFT JOIN peers p USING(peerid) WHERE a.peerid=? AND n.network_type='wireguard'"#)
             .bind(peerid)
             .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
         let mut final_addresses = Vec::new();
@@ -383,8 +441,13 @@ impl Wirespider for WirespiderServerState {
         let mut auth_peer = self.authenticate(request.metadata(), 0).await?;
         let mut updated = false;
 
-        let requested_nat_type = NatType::from_i32(request.get_ref().nat_type).ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
-        let requested_node_flags = request.get_ref().node_flags.as_ref().ok_or_else(|| Status::invalid_argument("Invalid NodeType"))?;
+        let requested_nat_type = NatType::from_i32(request.get_ref().nat_type)
+            .ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
+        let requested_node_flags = request
+            .get_ref()
+            .node_flags
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("Invalid NodeType"))?;
         if requested_node_flags.monitor && auth_peer.permissions < 25 {
             return Err(Status::permission_denied("Not allowed to monitor"));
         }
@@ -419,12 +482,12 @@ impl Wirespider for WirespiderServerState {
 
         // TODO: do not allow updating key to be the same as an existing entry
 
-        
-        let pubkey_result = sqlx::query(r#"SELECT pubkey FROM peers WHERE peerid=?"#)
-            .bind(auth_peer.peerid)
-            .fetch_one(&self.sqlite_pool)
-            .await
-            .into_status()?;
+        let pubkey_result =
+            sqlx::query(r#"SELECT pubkey, current_endpoint FROM peers WHERE peerid=?"#)
+                .bind(auth_peer.peerid)
+                .fetch_one(&self.sqlite_pool)
+                .await
+                .into_status()?;
         let old_pubkey = pubkey_result.get::<Option<&[u8]>, &str>("pubkey");
         if old_pubkey != Some(&publickey[0..32]) {
             updated = true;
@@ -437,18 +500,41 @@ impl Wirespider for WirespiderServerState {
                 self.send_peer_event(EventType::Deleted, peer.clone()).await;
             }
             //update database
-            sqlx::query(r#"UPDATE peers SET pubkey=?, nat_type=?, relay=?, monitor=?  WHERE peerid=?"#)
-                .bind(&publickey[0..32])
-                .bind(auth_peer.nat_type)
-                .bind(auth_peer.relay)
-                .bind(auth_peer.monitor)
-                .bind(auth_peer.peerid)
-                .execute(&self.sqlite_pool)
-                .await
-                .into_status()?;
+            sqlx::query(
+                r#"UPDATE peers SET pubkey=?, nat_type=?, relay=?, monitor=?  WHERE peerid=?"#,
+            )
+            .bind(&publickey[0..32])
+            .bind(auth_peer.nat_type)
+            .bind(auth_peer.relay)
+            .bind(auth_peer.monitor)
+            .bind(auth_peer.peerid)
+            .execute(&self.sqlite_pool)
+            .await
+            .into_status()?;
+        }
+        let old_endpoint = pubkey_result
+            .get::<Option<&str>, &str>("current_endpoint")
+            .and_then(|x| SocketAddr::from_str(x).ok());
+        let new_enpoint = request
+            .get_ref()
+            .endpoint
+            .clone()
+            .and_then(|x| x.try_into().ok());
+        if let Some(endpoint) = new_enpoint {
+            if Some(endpoint) != old_endpoint {
+                updated = true;
+                let endpoint = endpoint.to_string();
+                //update database
+                sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
+                    .bind(endpoint)
+                    .bind(auth_peer.peerid)
+                    .execute(&self.sqlite_pool)
+                    .await
+                    .into_status()?;
+            }
         }
 
-        let results = sqlx::query(r#"SELECT a.ip_address, n.network FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=?"#)
+        let results = sqlx::query(r#"SELECT a.ip_address, n.network FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? and n.network_type='wireguard'"#)
             .bind(auth_peer.peerid)
             .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get addresses"))?;
         let mut final_addresses = Vec::new();
@@ -459,16 +545,12 @@ impl Wirespider for WirespiderServerState {
                 .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
             if net.contains(&address) {
                 final_addresses.push(match (&net, &address) {
-                    (IpNet::V4(net), IpAddr::V4(addr)) => {
-                        Ipv4Net::new(*addr, net.prefix_len())
-                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                            .into()
-                    }
-                    (IpNet::V6(net), IpAddr::V6(addr)) => {
-                        Ipv6Net::new(*addr, net.prefix_len())
-                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                            .into()
-                    }
+                    (IpNet::V4(net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, net.prefix_len())
+                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                        .into(),
+                    (IpNet::V6(net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, net.prefix_len())
+                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
+                        .into(),
                     _ => unreachable!(),
                 });
             }
@@ -483,7 +565,11 @@ impl Wirespider for WirespiderServerState {
                 result.get::<&str, &str>("network")
             );
         }
-        let reply = AddressReply::new(&final_addresses);
+        let overlay_ips = self
+            .get_overlay_ips(auth_peer.peerid)
+            .await
+            .map_err(|_| Status::internal("allowed IP error"))?;
+        let reply = AddressReply::new(&final_addresses, &overlay_ips);
 
         if updated {
             let peer = self
@@ -513,11 +599,11 @@ impl Wirespider for WirespiderServerState {
                 cmp::Ordering::Greater => {
                     info!("initial2");
                     self.get_initial_events(&auth_peer).await?
-                },
+                }
                 cmp::Ordering::Equal => {
                     info!("empty");
                     Vec::new()
-                },
+                }
                 cmp::Ordering::Less => {
                     info!("skip");
                     event_list_guard
@@ -591,9 +677,11 @@ impl Wirespider for WirespiderServerState {
             addr_network_map.insert(addr, net);
         }
 
-        let mut transaction = self.sqlite_pool.begin().await.map_err(|_| Status::internal(
-            "SQL Error: could not start transaction",
-        ))?;
+        let mut transaction = self
+            .sqlite_pool
+            .begin()
+            .await
+            .map_err(|_| Status::internal("SQL Error: could not start transaction"))?;
         let peerid =
             sqlx::query("INSERT INTO peers (peer_name, token, permissions) VALUES (?, ?, ?)")
                 .bind(&request.name)
@@ -681,7 +769,9 @@ impl Wirespider for WirespiderServerState {
         match request.what {
             Some(change_peer_request::What::PermissionLevel(level)) => {
                 if auth_peer.permissions < 100 {
-                    return Err(Status::permission_denied("Only admins can change permission"));
+                    return Err(Status::permission_denied(
+                        "Only admins can change permission",
+                    ));
                 }
                 sqlx::query(r#"UPDATE peers SET permissions=? WHERE peerid=?"#)
                     .bind(level)

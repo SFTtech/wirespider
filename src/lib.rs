@@ -115,22 +115,25 @@ pub mod protocol {
     }
 
     impl AddressReply {
-        pub fn new(net: &[IpNet]) -> AddressReply {
+        pub fn new(net: &[IpNet], overlay: &[IpNet]) -> AddressReply {
             AddressReply {
-                address: net.iter().map(|x| (*x).into()).collect::<Vec<Network>>()
+                address: net.iter().map(|x| (*x).into()).collect::<Vec<Network>>(),
+                overlay_ips: overlay.iter().map(|x| (*x).into()).collect::<Vec<Network>>()
             }
         }
     }
 
     impl Peer {
-        pub fn new(pub_key: WireguardKey, name: String, endpoint: Option<SocketAddr>, allowed_ips: Vec<IpNet>, monitor: bool, relay: bool, nat_type: i32) -> Peer {
+        pub fn new(pub_key: WireguardKey, name: String, endpoint: Option<SocketAddr>, tunnel_ips: Vec<IpAddr>, allowed_ips: Vec<IpNet>, overlay_ips: Vec<IpNet>, monitor: bool, relay: bool, nat_type: i32) -> Peer {
             Peer {
                 wg_public_key: pub_key.to_vec(),
                 name,
                 endpoint: endpoint.map(|x| peer::Endpoint::Addr(Endpoint::from(x))),
                 allowed_ips: allowed_ips.into_iter().map(Network::from).collect(),
+                overlay_ips: overlay_ips.into_iter().map(Network::from).collect(),
                 node_flags: Some(NodeFlags {monitor, relay}),
-                nat_type
+                nat_type,
+                tunnel_ips: tunnel_ips.into_iter().map(Ip::from).collect()
             }
         }
 

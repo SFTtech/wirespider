@@ -1,29 +1,31 @@
-use super::interface_trait::ManagementInterface;
+use super::interface_trait::{OverlayManagementInterface, WireguardManagementInterface};
 
 use base64::encode;
+use eui48::MacAddress;
 use ipnet::IpNet;
-use std::{net::SocketAddr, num::NonZeroU16, process::Command};
+use std::{net::{IpAddr, SocketAddr}, num::NonZeroU16, process::Command};
 use tempfile::NamedTempFile;
 use tracing::debug;
 use wirespider::WireguardKey;
 
-pub struct CommandLineInterface {
+pub struct WireguardCommandLineInterface {
     device_name: String,
     addresses: Vec<IpNet>,
 }
 
-impl ManagementInterface for CommandLineInterface {
+impl WireguardManagementInterface for WireguardCommandLineInterface {
     type Error = ();
 
-    fn create_device(
+    fn create_wireguard_device(
         device_name: String,
         privkey: WireguardKey,
         port: Option<NonZeroU16>,
-        addresses: Vec<IpNet>,
+        addresses: &[IpNet],
     ) -> Result<Self, Self::Error> {
         // create interface
         let output = Command::new("ip")
-            .args(&["link", "add", &device_name, "type", "wireguard"])
+            // mtu 1432 for ipv4+pppoe, needs to be changed when ipv6 support is ready
+            .args(&["link", "add", &device_name, "mtu", "1432", "type", "wireguard"])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -47,7 +49,7 @@ impl ManagementInterface for CommandLineInterface {
 
         debug!("{:?}", output);
 
-        for address in &addresses {
+        for address in addresses {
             let ip_str = address.to_string();
             let output = Command::new("ip")
                 .args(&["address", "add", "dev", &device_name, &ip_str])
@@ -62,9 +64,9 @@ impl ManagementInterface for CommandLineInterface {
             .expect("failed to execute process");
         debug!("{:?}", output);
 
-        Ok(CommandLineInterface {
+        Ok(WireguardCommandLineInterface {
             device_name,
-            addresses,
+            addresses: addresses.to_vec(),
         })
     }
 
@@ -162,7 +164,17 @@ impl ManagementInterface for CommandLineInterface {
         Ok(())
     }
 
-    fn shutdown(&self) {
+    fn delete_device_if_exists(device_name: &str) {
+        let output = Command::new("ip")
+            .args(&["link", "del", device_name])
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
+    }
+}
+
+impl Drop for WireguardCommandLineInterface {
+    fn drop(&mut self) {
         let output = Command::new("ip")
             .args(&["link", "set", &self.device_name, "down"])
             .output()
@@ -174,6 +186,15 @@ impl ManagementInterface for CommandLineInterface {
             .expect("failed to execute process");
         debug!("{:?}", output);
     }
+}
+
+
+pub struct OverlayCommandLineInterface {
+    device_name: String,
+}
+
+impl OverlayManagementInterface for OverlayCommandLineInterface {
+    type Error = ();
 
     fn delete_device_if_exists(device_name: &str) {
         let output = Command::new("ip")
@@ -181,5 +202,60 @@ impl ManagementInterface for CommandLineInterface {
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
+    }
+
+    fn create_overlay_device(device_name: String, listen_device: &str, listen_addr: &IpAddr, addresses: Vec<IpNet>, mac_addr: MacAddress) -> Result<Self,Self::Error> {
+        // create interface
+        let args = &["link", "add", &device_name, "address", &mac_addr.to_hex_string(), "mtu", "1378", "type", "vxlan", "id", "14523699", "dev", listen_device, "local", &listen_addr.to_string(), "dstport", "4789", "nolearning", "nol3miss", "nol2miss"];
+        debug!("running ip {}", args.join(" "));
+        let output = Command::new("ip") // note: mtu is dependent on wireguard mtu
+            .args(args)
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
+
+        let output = Command::new("ip") // note: mtu is dependent on wireguard mtu
+            .args(&["link", "set", &device_name, "up"])
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
+
+        for address in &addresses {
+            let ip_str = address.to_string();
+            let output = Command::new("ip")
+                .args(&["address", "add", "dev", &device_name, &ip_str])
+                .output()
+                .expect("failed to execute process");
+            debug!("{:?}", output);
+        }
+
+        Ok(OverlayCommandLineInterface { device_name })
+    }
+
+    fn set_peer(&self, mac_addr: MacAddress, net: IpNet, remote: IpAddr) -> Result<(),Self::Error> {
+        let args = &["fdb", "add", &mac_addr.to_hex_string(), "dev", &self.device_name, "dst", &remote.to_string(), "port", "4789"];
+        debug!("running: bridge {}", args.join(" "));
+        let output = Command::new("bridge")
+            .args(args)
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
+        let args = &["neigh", "add", &net.addr().to_string(), "lladdr", &mac_addr.to_hex_string(), "dev", &self.device_name];
+        debug!("running: ip {}", args.join(" "));
+        let output = Command::new("ip")
+            .args(args)
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
+        Ok(())
+    }
+
+    fn remove_peer(&self, mac_addr: eui48::MacAddress) -> Result<(), Self::Error> {
+        let output = Command::new("bridge")
+        .args(&["fdb", "del", &mac_addr.to_hex_string(), "dev", &self.device_name])
+        .output()
+        .expect("failed to execute process");
+        debug!("{:?}", output);
+        Ok(())
     }
 }
