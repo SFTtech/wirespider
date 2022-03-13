@@ -362,8 +362,10 @@ checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 [[package]]
 name = "eui48"
 version = "1.1.0"
-source = "git+https://github.com/oblique/eui48.git?rev=7ac583d6766ff423de88483fb2c458b554c0ad0d#7ac583d6766ff423de88483fb2c458b554c0ad0d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "887418ac5e8d57c2e66e04bdc2fe15f9a5407be20b54a82c86bd0e368b709701"
 dependencies = [
+ "regex",
  "rustc-serialize",
 ]
 
@@ -2071,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "wirespider"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-stream",
  "backoff",
