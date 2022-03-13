@@ -51,11 +51,10 @@ The admin can now use the `wirespider client manage` commands to create other pe
 ### Contact
 
 If you have questions, suggestions, encounter any problem,
-please join our Matrix or IRC channel and ask!
+please join our Matrix channel and ask!
 
 ```
 #sfttech:matrix.org
-irc.freenode.net #sfttech
 ```
 
 Of course, create [issues](https://github.com/SFTtech/wirespider/issues)
