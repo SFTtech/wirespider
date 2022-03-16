@@ -351,8 +351,14 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             EventType::Deleted => {
+                                let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap_or_log();
+                                let mut mac_bytes = Vec::with_capacity(6);
+                                mac_bytes.push(0xaa);
+                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
+                                overlay_interface.remove_peer(mac_addr).unwrap_or_log();
                                 interface
-                                    .remove_peer(peer.wg_public_key.try_into().unwrap())
+                                    .remove_peer(pubkey)
                                     .unwrap();
                             }
                         },
