@@ -440,6 +440,7 @@ impl Wirespider for WirespiderServerState {
     ) -> Result<Response<AddressReply>, Status> {
         let mut auth_peer = self.authenticate(request.metadata(), 0).await?;
         let mut updated = false;
+        let mut eventtype = EventType::Changed;
 
         let requested_nat_type = NatType::from_i32(request.get_ref().nat_type)
             .ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
@@ -491,6 +492,7 @@ impl Wirespider for WirespiderServerState {
         let old_pubkey = pubkey_result.get::<Option<&[u8]>, &str>("pubkey");
         if old_pubkey != Some(&publickey[0..32]) {
             updated = true;
+            eventtype = EventType::New;
             if old_pubkey.is_some() {
                 //delete the old peer
                 let peer = self
@@ -576,7 +578,7 @@ impl Wirespider for WirespiderServerState {
                 .get_peer_from_peerid(auth_peer.peerid)
                 .await?
                 .ok_or_else(|| Status::internal("Peer deleted"))?;
-            self.send_peer_event(EventType::New, peer.clone()).await;
+            self.send_peer_event(eventtype, peer.clone()).await;
         } else {
             debug!("No update sent!");
         }

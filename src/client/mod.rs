@@ -33,6 +33,7 @@ use uuid::Uuid;
 use wirespider::protocol::*;
 use wirespider::{protocol::wirespider_client::WirespiderClient, WireguardKey};
 use x25519_dalek_ng::{PublicKey, StaticSecret};
+use local_ip_address::list_afinet_netifas;
 
 use tracing::{error, debug};
 
@@ -226,6 +227,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                 .await
                 .unwrap_or_log()
                 .expect("Could not determine NAT, are you connected to the internet?");
+            let local_ips = list_afinet_netifas().unwrap_or_log().into_iter().map(|(_,ip)| ip.into()).collect();
             let address_reply = client
                 .get_addresses(AddressRequest {
                     wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
@@ -235,6 +237,7 @@ pub async fn client(opt: ClientCli) -> Result<(), Box<dyn std::error::Error>> {
                         relay: start_opts.relay,
                     }),
                     endpoint: external_address.map(|x| x.into()),
+                    local_ips: local_ips,
                 })
                 .await?
                 .into_inner();

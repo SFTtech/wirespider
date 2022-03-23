@@ -21,6 +21,7 @@ message AddressRequest {
     Endpoint endpoint = 2;
     NodeFlags node_flags = 3;
     NatType nat_type = 4;
+    repeated IP local_ips = 5;
 }
 
 message AddressReply {

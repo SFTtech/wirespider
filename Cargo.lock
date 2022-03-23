@@ -38,6 +38,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4361135be9122e0870de935d7c439aef945b9f9ddd4199a553b5270b49c82a27"
 
 [[package]]
+name = "async-shutdown"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a0530589772e3689f22201f7afc108c252c887a40914fb89285b8f2f22923ff"
+
+[[package]]
 name = "async-stream"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,12 +143,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27613a6e00ca92c1d3e1180e6be860dc590401985d8ef49000329952adc09e85"
 
 [[package]]
-name = "build_const"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ae4235e6dac0694637c763029ecea1a2ec9e4e06ec2729bd21ba4d9c863eb7"
-
-[[package]]
 name = "bumpalo"
 version = "3.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -213,21 +213,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-sha1"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb58b6451e8c2a812ad979ed1d83378caa5e927eef2622017a45f251457c2c9d"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95059428f66df56b63431fdb4e1947ed2190586af5c5a8a8b71122bdf5a7f469"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "crc"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d663548de7f5cca343f1e0a48d14dcfb0e9eb4e079ec58883b7251539fa10aeb"
-dependencies = [
- "build_const",
 ]
 
 [[package]]
@@ -753,6 +750,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "local-ip-address"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b143c6ef86e36328caa40a7578e95d1544aca8a1740235fd2b416a69441a5c7"
+dependencies = [
+ "libc",
+ "memalloc",
+ "neli 0.5.3",
+ "thiserror",
+ "windows",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -781,6 +791,12 @@ name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
+
+[[package]]
+name = "memalloc"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df39d232f5c40b0891c10216992c2f250c054105cb1e56f0fc9032db6203ecc1"
 
 [[package]]
 name = "memchr"
@@ -830,6 +846,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f18857289379de670867542caa2923f46596e04cdeceed178d9cab723dc60e3"
 dependencies = [
  "buffering",
+ "byteorder",
+ "libc",
+]
+
+[[package]]
+name = "neli"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9053554eb5dcb7e10d9cdab1206965bde870eed5d0d341532ca035e3ba221508"
+dependencies = [
  "byteorder",
  "libc",
 ]
@@ -1318,7 +1344,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "bytes",
- "crc 2.1.0",
+ "crc",
  "crossbeam-queue",
  "either",
  "flume",
@@ -1406,16 +1432,16 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "stun_codec"
-version = "0.1.13"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00241c5479b10c738408a263970fa46ea10924c8851bf45e8c24b306083b5a60"
+checksum = "1f1df6c4e592afc1ffed8f4bc50ab9f4d70cfccb42829662b7d276247cbef3b1"
 dependencies = [
  "bytecodec",
  "byteorder",
- "crc 1.8.1",
+ "crc",
  "hmac-sha1",
  "md5",
- "trackable 0.2.24",
+ "trackable 1.2.0",
 ]
 
 [[package]]
@@ -2059,6 +2085,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
+name = "windows"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68088239696c06152844eadc03d262f088932cce50c67e4ace86e19d95e976fe"
+dependencies = [
+ "const-sha1",
+ "windows_gen",
+ "windows_macros",
+]
+
+[[package]]
+name = "windows_gen"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf583322dc423ee021035b358e535015f7fd163058a31e2d37b99a939141121d"
+
+[[package]]
+name = "windows_macros"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58acfb8832e9f707f8997bd161e537a1c1f603e60a5bd9c3cf53484fdcc998f3"
+dependencies = [
+ "syn 1.0.88",
+ "windows_gen",
+]
+
+[[package]]
 name = "wireguard-uapi"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2066,7 +2119,7 @@ checksum = "1227b47e473cd3e190c99c50fb6d8d7e1477fa1f9d9bdf7d5a596218fb7a9621"
 dependencies = [
  "derive_builder",
  "libc",
- "neli",
+ "neli 0.4.3",
  "thiserror",
 ]
 
@@ -2074,6 +2127,7 @@ dependencies = [
 name = "wirespider"
 version = "0.3.1"
 dependencies = [
+ "async-shutdown",
  "async-stream",
  "backoff",
  "base64",
@@ -2083,6 +2137,7 @@ dependencies = [
  "futures",
  "ipnet",
  "lazy_static",
+ "local-ip-address",
  "prost",
  "rand",
  "sqlx",

@@ -1,0 +1,1 @@
+ALTER TABLE peers ADD COLUMN local_ips TEXT;

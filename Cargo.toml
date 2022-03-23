@@ -20,7 +20,7 @@ wireguard-uapi = "2.0.2"
 # grpc
 tonic = { version = "0.6.2", features = ["tls", "tls-webpki-roots"]}
 prost = "0.9"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -41,9 +41,13 @@ tracing-error = "0.2"
 tracing-unwrap = "0.9"
 
 # nat traversal
-stun_codec = "0.1.13"
+stun_codec = "0.2.0"
 bytecodec = "0.4.15"
 trackable = "1.2.0"
+local-ip-address = "0.4.4"
+
+# shutdown
+async-shutdown = "0.1.2"
 
 # retry
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
