@@ -21,6 +21,8 @@ message AddressRequest {
     Endpoint endpoint = 2;
     NodeFlags node_flags = 3;
     NatType nat_type = 4;
+    repeated IP local_ips = 5;
+    uint32 local_port = 6;
 }
 
 message AddressReply {
@@ -122,6 +124,8 @@ message Peer {
     NatType nat_type = 6;
     repeated Network overlay_ips = 7;
     repeated IP tunnel_ips = 8;
+    repeated IP local_ips = 9;
+    uint32 local_port = 10;
 }
 
 message Endpoint {
