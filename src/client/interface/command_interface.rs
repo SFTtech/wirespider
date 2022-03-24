@@ -188,7 +188,6 @@ impl Drop for WireguardCommandLineInterface {
     }
 }
 
-
 pub struct OverlayCommandLineInterface {
     device_name: String,
 }
@@ -267,5 +266,11 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         .expect("failed to execute process");
         debug!("{:?}", output);
         Ok(())
+    }
+}
+
+impl Drop for OverlayCommandLineInterface {
+    fn drop(&mut self) {
+        OverlayCommandLineInterface::delete_device_if_exists(&self.device_name);
     }
 }
