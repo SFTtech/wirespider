@@ -6,17 +6,16 @@ use eui48::MacAddress;
 use ipnet::IpNet;
 use local_ip_address::list_afinet_netifas;
 use rand::{rngs::OsRng, Rng};
-use tonic::client::GrpcService;
-use tonic::codegen::*;
+use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, error};
 use tracing_unwrap::ResultExt;
 use wirespider::{
-    protocol::{event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags, wirespider_client::WirespiderClient},
+    protocol::{event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags},
     WireguardKey,
 };
 use x25519_dalek_ng::{PublicKey, StaticSecret};
 
-use crate::client::{interface::OverlayManagementInterface, DefaultOverlayInterface};
+use crate::client::{DefaultOverlayInterface, connect, interface::OverlayManagementInterface};
 use crate::client::{
     interface::WireguardManagementInterface, monitor, nat::get_nat_type, DefaultWireguardInterface,
     CLIENT_STATE,
@@ -25,11 +24,22 @@ use futures::TryStreamExt;
 
 use super::StartCommand;
 
-pub async fn event_loop<T: 'static,F>(mut client: WirespiderClient<T>, start_opts: StartCommand) -> Result<(), Box<dyn std::error::Error>> where T: tonic::client::GrpcService<tonic::body::BoxBody> + Clone + Send,
-T::ResponseBody: Body + Send + 'static,
-T::Error: Into<StdError>,
-<T::ResponseBody as Body>::Error: Into<StdError> + Send,
-<T as GrpcService<tonic::body::BoxBody>>::Future: Send {
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum EventLoopError {
+    #[error(transparent)]
+    TransportError(#[from] tonic::transport::Error),
+    #[error(transparent)]
+    ConnectionError(#[from] crate::client::ConnectionError),
+    #[error(transparent)]
+    StatusError(#[from] tonic::Status),
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+}
+
+pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Result<(), EventLoopError> {
+    let mut client = connect(start_opts.connection).await?;
     let mut rng = OsRng::default();
     // delete the existing device, so we do not disturb the nat detection
     DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
@@ -154,120 +164,127 @@ T::Error: Into<StdError>,
         .await?
         .into_inner();
         loop {
-            let event = match events_stream.try_next().await {
-                Ok(Some(event)) => event,
-                Err(error) => {
-                    error!("got error in main loop: {}", error);
+            tokio::select! {
+                event = events_stream.try_next() => {
+                    let event = match event {
+                        Ok(Some(event)) => event,
+                        Err(error) => {
+                            error!("got error in main loop: {}", error);
+                            break;
+                        }
+                        _ => break,
+                    };
+                    debug!("Event: {:?}", &event);
+                    CLIENT_STATE.update(&event).await;
+                    let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
+                    match event.target {
+                        Some(event::Target::Peer(peer)) => match event_type {
+                            EventType::New | EventType::Changed => {
+                                let endpoint = peer.endpoint.map(|x| match x {
+                                    peer::Endpoint::Addr(x) => x.try_into().unwrap(),
+                                });
+                                let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap();
+                                let mut mac_bytes = Vec::with_capacity(6);
+                                mac_bytes.push(0xaa);
+                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+        
+                                let allowed_ips: Vec<IpNet> = peer
+                                    .allowed_ips
+                                    .into_iter()
+                                    .map(|x| x.try_into().unwrap())
+                                    .collect();
+                                let peer_flags = peer.node_flags.unwrap_or(NodeFlags {
+                                    monitor: false,
+                                    relay: false,
+                                });
+                                let peer_nat_type =
+                                    NatType::from_i32(peer.nat_type).unwrap_or(NatType::NoNat);
+                                let keep_alive = if peer_flags.monitor {
+                                    Some(start_opts.keep_alive)
+                                } else {
+                                    match nat_type {
+                                        NatType::NoNat => None,
+                                        _ => Some(start_opts.keep_alive),
+                                    }
+                                };
+                                let create = if start_opts.monitor || start_opts.relay {
+                                    true
+                                } else {
+                                    match (nat_type, peer_nat_type) {
+                                        (
+                                            NatType::Symmetric,
+                                            NatType::Symmetric | NatType::PortRestrictedCone,
+                                        ) => false,
+                                        (NatType::PortRestrictedCone, NatType::Symmetric) => false,
+                                        (_, _) => true,
+                                    }
+                                };
+                                if create {
+                                    interface
+                                        .set_peer(pubkey, endpoint, keep_alive, &allowed_ips)
+                                        .unwrap();
+                                }
+                                let destination_ip = peer
+                                    .tunnel_ips
+                                    .into_iter()
+                                    .next()
+                                    .map(|x| x.try_into())
+                                    .unwrap()
+                                    .unwrap();
+                                let overlay_ip = peer.overlay_ips.into_iter().next();
+                                if let Some(dest_net) = overlay_ip {
+                                    overlay_interface
+                                        .set_peer(mac_addr, dest_net.try_into()?, destination_ip)
+                                        .unwrap();
+                                }
+                            }
+                            EventType::Deleted => {
+                                let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap_or_log();
+                                let mut mac_bytes = Vec::with_capacity(6);
+                                mac_bytes.push(0xaa);
+                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
+                                overlay_interface.remove_peer(mac_addr).unwrap_or_log();
+                                interface.remove_peer(pubkey).unwrap();
+                            }
+                        },
+                        Some(event::Target::Route(route)) => match event_type {
+                            EventType::New => {
+                                interface
+                                    .add_route(
+                                        route.to.unwrap().try_into().unwrap(),
+                                        route.via.unwrap().try_into().unwrap(),
+                                    )
+                                    .unwrap();
+                            }
+                            EventType::Deleted => {
+                                interface
+                                    .remove_route(
+                                        route.to.unwrap().try_into().unwrap(),
+                                        route.via.unwrap().try_into().unwrap(),
+                                    )
+                                    .unwrap();
+                            }
+                            _ => {
+                                println!("Got invalid route change event");
+                            }
+                        },
+                        _ => {
+                            println!("Got invalid event target: {:?}", event.target);
+                        }
+                    }
+                    if event_counter < event.id {
+                        event_counter = event.id;
+                    }
+                    if event_counter == 0 {
+                        event_counter = 1;
+                    }
+                },
+                _ = subsys.on_shutdown_requested() => {
                     break;
                 }
-                _ => break,
             };
-            debug!("Event: {:?}", &event);
-            CLIENT_STATE.update(&event).await;
-            let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
-            match event.target {
-                Some(event::Target::Peer(peer)) => match event_type {
-                    EventType::New | EventType::Changed => {
-                        let endpoint = peer.endpoint.map(|x| match x {
-                            peer::Endpoint::Addr(x) => x.try_into().unwrap(),
-                        });
-                        let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap();
-                        let mut mac_bytes = Vec::with_capacity(6);
-                        mac_bytes.push(0xaa);
-                        mac_bytes.extend_from_slice(&pubkey[0..5]);
-                        let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
-
-                        let allowed_ips: Vec<IpNet> = peer
-                            .allowed_ips
-                            .into_iter()
-                            .map(|x| x.try_into().unwrap())
-                            .collect();
-                        let peer_flags = peer.node_flags.unwrap_or(NodeFlags {
-                            monitor: false,
-                            relay: false,
-                        });
-                        let peer_nat_type =
-                            NatType::from_i32(peer.nat_type).unwrap_or(NatType::NoNat);
-                        let keep_alive = if peer_flags.monitor {
-                            Some(start_opts.keep_alive)
-                        } else {
-                            match nat_type {
-                                NatType::NoNat => None,
-                                _ => Some(start_opts.keep_alive),
-                            }
-                        };
-                        let create = if start_opts.monitor || start_opts.relay {
-                            true
-                        } else {
-                            match (nat_type, peer_nat_type) {
-                                (
-                                    NatType::Symmetric,
-                                    NatType::Symmetric | NatType::PortRestrictedCone,
-                                ) => false,
-                                (NatType::PortRestrictedCone, NatType::Symmetric) => false,
-                                (_, _) => true,
-                            }
-                        };
-                        if create {
-                            interface
-                                .set_peer(pubkey, endpoint, keep_alive, &allowed_ips)
-                                .unwrap();
-                        }
-                        let destination_ip = peer
-                            .tunnel_ips
-                            .into_iter()
-                            .next()
-                            .map(|x| x.try_into())
-                            .unwrap()
-                            .unwrap();
-                        let overlay_ip = peer.overlay_ips.into_iter().next();
-                        if let Some(dest_net) = overlay_ip {
-                            overlay_interface
-                                .set_peer(mac_addr, dest_net.try_into()?, destination_ip)
-                                .unwrap();
-                        }
-                    }
-                    EventType::Deleted => {
-                        let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap_or_log();
-                        let mut mac_bytes = Vec::with_capacity(6);
-                        mac_bytes.push(0xaa);
-                        mac_bytes.extend_from_slice(&pubkey[0..5]);
-                        let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
-                        overlay_interface.remove_peer(mac_addr).unwrap_or_log();
-                        interface.remove_peer(pubkey).unwrap();
-                    }
-                },
-                Some(event::Target::Route(route)) => match event_type {
-                    EventType::New => {
-                        interface
-                            .add_route(
-                                route.to.unwrap().try_into().unwrap(),
-                                route.via.unwrap().try_into().unwrap(),
-                            )
-                            .unwrap();
-                    }
-                    EventType::Deleted => {
-                        interface
-                            .remove_route(
-                                route.to.unwrap().try_into().unwrap(),
-                                route.via.unwrap().try_into().unwrap(),
-                            )
-                            .unwrap();
-                    }
-                    _ => {
-                        println!("Got invalid route change event");
-                    }
-                },
-                _ => {
-                    println!("Got invalid event target: {:?}", event.target);
-                }
-            }
-            if event_counter < event.id {
-                event_counter = event.id;
-            }
-            if event_counter == 0 {
-                event_counter = 1;
-            }
         }
     }
 }
