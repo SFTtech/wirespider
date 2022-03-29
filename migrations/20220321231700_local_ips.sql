@@ -1,1 +1,2 @@
 ALTER TABLE peers ADD COLUMN local_ips TEXT;
+ALTER TABLE peers ADD COLUMN local_port INTEGER;

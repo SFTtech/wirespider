@@ -120,7 +120,7 @@ pub async fn server_run(opt: RunCommand) -> anyhow::Result<()> {
     debug!("Starting");
 
     Toplevel::new()
-        .start("TonicService", move |handle| tonic_service(handle, opt.bind.clone()))
+        .start("TonicService", move |handle| tonic_service(handle, opt.bind))
         .catch_signals()
         .handle_shutdown_requests(Duration::from_millis(1000)).await?;
 
@@ -159,7 +159,7 @@ pub async fn server_manage(opt: ManageCommand) -> anyhow::Result<()> {
             let mut addr_network_map: HashMap<IpNet, IpNet> = HashMap::new();
             for addr in addresses {
                 let net = addr.clone().trunc();
-                if !networkid_map.contains_key(&net) {
+                if let std::collections::hash_map::Entry::Vacant(entry) = networkid_map.entry(net) {
                     let result =
                         sqlx::query("SELECT networkid FROM networks WHERE network=? AND ipv6=?")
                             .bind(net.to_string())
@@ -170,7 +170,7 @@ pub async fn server_manage(opt: ManageCommand) -> anyhow::Result<()> {
                             .fetch_one(&pool)
                             .await
                             .context(format!("Could not find network for IP: {}", addr))?;
-                    networkid_map.insert(net, result.get("networkid"));
+                    entry.insert(result.get("networkid"));
                 }
                 addr_network_map.insert(addr, net);
             }

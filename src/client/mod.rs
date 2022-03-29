@@ -5,6 +5,7 @@ use std::{net::IpAddr, num::NonZeroU16};
 mod client_state;
 mod endpoint;
 mod event_loop;
+mod local_ip_detection;
 mod interface;
 mod monitor;
 mod nat;
@@ -62,7 +63,7 @@ pub struct StartCommand {
     base: BaseOptions,
     #[clap(flatten)]
     connection: ConnectionOptions,
-    #[clap(required = true, short, long, env = "WS_DEVICE")]
+    #[clap(required = true, short = 'i', long, env = "WS_DEVICE")]
     device: String,
     #[clap(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY")]
     private_key: String,

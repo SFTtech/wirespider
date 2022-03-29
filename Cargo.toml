@@ -12,24 +12,27 @@ description = "Wirespider distributes wireguard tunnel configurations and routes
 [dependencies]
 clap = { version = "3.1.3", features = ["derive","env"] }
 lazy_static = "1.4.0"
+itertools = "0.10.3"
 
 #wireguard
 x25519-dalek-ng = "1.1"
 wireguard-uapi = "2.0.2"
 
 # grpc
-tonic = { version = "0.6.2", features = ["tls", "tls-webpki-roots"]}
+tonic = { version = "0.6", features = ["tls", "tls-webpki-roots"]}
 prost = "0.9"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+typed-builder = "0.10.0"
 
 #database
 sqlx = { version = "0.5", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.13"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.3"
+iprange = "0.6.7"
 eui48 = "1.1.0"
 uuid = { version = "0.8", features = ["v4"] }
 tempfile = "3.3"
@@ -58,6 +61,7 @@ backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
 
 [build-dependencies]
 tonic-build = { version = "0.6" }
+prost-build = { version = "0.9" }
 
 # [profile.release]
 # opt-level = 3

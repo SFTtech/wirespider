@@ -123,19 +123,37 @@ pub mod protocol {
         }
     }
 
+    // impl PeerBuilder {
+    //     pub fn pubkey(&mut self, pub_key: WireguardKey) {
+    //         self.wg_public_key = Some(pub_key.to_vec());
+    //     }
+
+    //     pub fn allowed_ips(&mut self, allowed_ips: Vec<IpNet>) {
+    //         self.allowed_ips = Some(allowed_ips.into_iter().map(Network::from).collect());
+    //     }
+
+    //     pub fn endpoint(&mut self, endpoint: Option<SocketAddr>) {
+    //         self.endpoint = Some(endpoint.map(|x| peer::Endpoint::Addr(Endpoint::from(x))));
+    //     }
+
+    //     pub fn overlay_ips(&mut self, overlay_ips: Vec<IpNet>) {
+    //         self.overlay_ips = Some(overlay_ips.into_iter().map(Network::from).collect());
+    //     }
+
+    //     pub fn node_flags(&mut self, monitor: bool, relay: bool) {
+    //         self.node_flags = Some(Some(NodeFlags{monitor, relay}));
+    //     }
+
+    //     pub fn tunnel_ips(&mut self, tunnel_ips: Vec<IpAddr>) {
+    //         self.tunnel_ips = Some(tunnel_ips.into_iter().map(Ip::from).collect());
+    //     }
+
+    //     pub fn local_ips(&mut self, local_ips: Vec<IpAddr>) {
+    //         self.local_ips = Some(local_ips.into_iter().map(Ip::from).collect());
+    //     }
+    // }
+    
     impl Peer {
-        pub fn new(pub_key: WireguardKey, name: String, endpoint: Option<SocketAddr>, tunnel_ips: Vec<IpAddr>, allowed_ips: Vec<IpNet>, overlay_ips: Vec<IpNet>, monitor: bool, relay: bool, nat_type: i32) -> Peer {
-            Peer {
-                wg_public_key: pub_key.to_vec(),
-                name,
-                endpoint: endpoint.map(|x| peer::Endpoint::Addr(Endpoint::from(x))),
-                allowed_ips: allowed_ips.into_iter().map(Network::from).collect(),
-                overlay_ips: overlay_ips.into_iter().map(Network::from).collect(),
-                node_flags: Some(NodeFlags {monitor, relay}),
-                nat_type,
-                tunnel_ips: tunnel_ips.into_iter().map(Ip::from).collect()
-            }
-        }
 
         pub fn pub_key(&self) -> WireguardKey {
             if self.wg_public_key.len() != 32 {

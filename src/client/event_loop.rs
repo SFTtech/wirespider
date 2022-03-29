@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, net::SocketAddr};
 
 use backoff::future::retry;
 use base64::{decode, encode};
@@ -15,7 +15,7 @@ use wirespider::{
 };
 use x25519_dalek_ng::{PublicKey, StaticSecret};
 
-use crate::client::{DefaultOverlayInterface, connect, interface::OverlayManagementInterface};
+use crate::client::{DefaultOverlayInterface, connect, interface::OverlayManagementInterface, local_ip_detection::{check_local_ips, local_ip_detection_service}};
 use crate::client::{
     interface::WireguardManagementInterface, monitor, nat::get_nat_type, DefaultWireguardInterface,
     CLIENT_STATE,
@@ -29,13 +29,13 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum EventLoopError {
     #[error(transparent)]
-    TransportError(#[from] tonic::transport::Error),
+    Transport(#[from] tonic::transport::Error),
     #[error(transparent)]
-    ConnectionError(#[from] crate::client::ConnectionError),
+    Connection(#[from] crate::client::ConnectionError),
     #[error(transparent)]
-    StatusError(#[from] tonic::Status),
+    Status(#[from] tonic::Status),
     #[error(transparent)]
-    IOError(#[from] std::io::Error),
+    IO(#[from] std::io::Error),
 }
 
 pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Result<(), EventLoopError> {
@@ -66,6 +66,7 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Re
             .await
         }
     });
+    debug!("Nat detection started");
 
     let private_key = if std::path::Path::new(&start_opts.private_key).exists() {
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
@@ -84,6 +85,10 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Re
         tokio::fs::write(&start_opts.private_key, &encoded).await?;
         private_key
     };
+    let pubkey = PublicKey::from(&private_key).to_bytes();
+    debug!("Starting local ip detection endpoint subsystem");
+    subsys.start("LocalIpEndpoint", move |x| local_ip_detection_service(x, pubkey));
+
     let (external_address, nat_type) = nat_detection
         .await
         .unwrap_or_log()
@@ -93,6 +98,7 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Re
         .into_iter()
         .map(|(_, ip)| ip.into())
         .collect();
+    debug!("local ips: {local_ips:?}");
     let address_reply = client
         .get_addresses(AddressRequest {
             wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
@@ -103,8 +109,9 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Re
             }),
             endpoint: external_address.map(|x| x.into()),
             local_ips,
+            local_port: port.get().into()
         })
-        .await?
+        .await.unwrap_or_log()
         .into_inner();
     debug!("{:?}", address_reply);
     let address_list: Vec<IpNet> = address_reply
@@ -188,6 +195,15 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Re
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&pubkey[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+                                
+                                debug!("getting local ips");
+                                let local_ips = peer.local_ips.iter().map(|x| x.try_into()).collect::<Result<Vec<_>,_>>().unwrap_or_log();
+                                let local_ip = check_local_ips(&local_ips, pubkey).await.unwrap_or_log();
+                                let endpoint = match local_ip {
+                                    Some(ip) => Some(SocketAddr::from((ip,peer.local_port.try_into().unwrap_or_log()))),
+                                    None => endpoint,
+                                };
+                                debug!("Got endpoint: {:?}", endpoint);
         
                                 let allowed_ips: Vec<IpNet> = peer
                                     .allowed_ips
