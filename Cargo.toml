@@ -41,7 +41,7 @@ tracing-error = "0.2"
 tracing-unwrap = "0.9"
 
 # nat traversal
-stun_codec = "0.1.13"
+stun_codec = "0.2.0"
 bytecodec = "0.4.15"
 trackable = "1.2.0"
 
