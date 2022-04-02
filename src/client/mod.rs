@@ -43,17 +43,17 @@ lazy_static! {
 #[derive(Debug, Args)]
 pub struct BaseOptions {
     /// enable debug
-    #[clap(short, long)]
+    #[clap(short, long, help = "Enable debugging")]
     debug: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct ConnectionOptions {
-    #[clap(short, long, parse(try_from_str), env = "WS_ENDPOINT")]
+    #[clap(short, long, parse(try_from_str), env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
     endpoint: Uri,
 
     /// Token for authentication
-    #[clap(short, long, parse(try_from_str), env = "WS_TOKEN")]
+    #[clap(short, long, parse(try_from_str), env = "WS_TOKEN", help = "Token used for authentication")]
     token: Uuid,
 }
 
@@ -63,58 +63,64 @@ pub struct StartCommand {
     base: BaseOptions,
     #[clap(flatten)]
     connection: ConnectionOptions,
-    #[clap(required = true, short = 'i', long, env = "WS_DEVICE")]
+    #[clap(required = true, short = 'i', long, env = "WS_DEVICE", help = "Device name to use for wireguard.")]
     device: String,
-    #[clap(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY")]
+    #[clap(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY", help = "Path to wireguard private key")]
     private_key: String,
-    #[clap(long, env = "WS_NODE_MONITOR")]
+    #[clap(long, env = "WS_NODE_MONITOR", help = "Request monitor role in network")]
     monitor: bool,
-    #[clap(long, env = "WS_NODE_RELAY")]
+    #[clap(long, env = "WS_NODE_RELAY", help = "Request relay role in network")]
     relay: bool,
-    #[clap(long, default_value = "25", env = "WS_KEEP_ALIVE")]
+    #[clap(long, default_value = "25", env = "WS_KEEP_ALIVE", help = "Keepalive for wireguard")]
     keep_alive: NonZeroU16,
-    #[clap(short, long, env = "WS_LISTEN_PORT")]
+    #[clap(short, long, env = "WS_LISTEN_PORT", help = "Wireguard listen port")]
     port: Option<NonZeroU16>,
     #[clap(
         long,
         env = "WS_STUN_HOST",
-        default_value = "stun.stunprotocol.org:3478"
+        default_value = "stun.stunprotocol.org:3478",
+        help = "Stun server to use, must support RFC 5780"
     )]
     stun_host: String,
-    #[clap(long, env = "WS_FIXED_ENDPOINT")]
+    #[clap(long, env = "WS_FIXED_ENDPOINT", help = "Skip NAT detection, report this endpoint and send NAT type \"NoNAT\" to server")]
     fixed_endpoint: Option<SocketAddr>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ManageCommand {
-    #[clap(subcommand)]
+    #[clap(flatten)]
     Peer(ManagePeerCommand),
-    #[clap(subcommand)]
+    #[clap(flatten)]
     Route(ManageRouteCommand),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ManagePeerCommand {
+    #[clap(name = "add-peer", about = "Add peer")]
     Add(AddPeerCommand),
+    #[clap(name = "change-peer", about = "Change peer properties")]
     Change(ChangePeerCommand),
+    #[clap(name = "delete-peer", about = "Delete peer")]
     Delete(DeletePeerCommand),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ManageRouteCommand {
+    #[clap(name = "add-route", about = "Add new route")]
     Add(AddRouteCommand),
+    #[clap(name = "delete-route", about = "Delete route")]
     Delete(DeleteRouteCommand),
 }
 
 #[derive(Debug, Args)]
 #[clap(group = ArgGroup::new("peer_identifier").required(true))]
 pub struct CliPeerIdentifier {
-    #[clap(long, group = "peer_identifier")]
-    name: Option<String>,
-    #[clap(long, group = "peer_identifier")]
-    token: Option<Uuid>,
-    #[clap(long, group = "peer_identifier")]
-    public_key: Option<String>,
+    #[clap(long, group = "peer_identifier", help = "Name of the target peer")]
+    name_id: Option<String>,
+    #[clap(long, group = "peer_identifier", help = "Token of the target peer")]
+    token_id: Option<Uuid>,
+    #[clap(long, group = "peer_identifier", help = "Public key (base64) of the target peer")]
+    public_key_id: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -123,10 +129,11 @@ pub struct AddPeerCommand {
     base: BaseOptions,
     #[clap(flatten)]
     connection: ConnectionOptions,
-    #[clap(short, long, default_value = "0")]
+    #[clap(short, long, default_value = "0", help = "Permission level of the new user", long_help = "Permission level of the new user (Admin: 100, Relay: 50, Monitor: 25, Normal users: 0)")]
     permission_level: i32,
+    #[clap(help = "Name of the peer")]
     name: String,
-    #[clap(required = true, min_values = 1)]
+    #[clap(required = true, min_values = 1, help = "IPs to assign to this peer")]
     addresses: Vec<IpNet>,
 }
 
@@ -138,7 +145,8 @@ pub struct ChangePeerCommand {
     connection: ConnectionOptions,
     #[clap(flatten)]
     peer: CliPeerIdentifier,
-    endpoint: SocketAddr,
+    #[clap(help = "Endpoint to report to other peers")]
+    new_endpoint: SocketAddr,
 }
 
 #[derive(Debug, Args)]
@@ -157,7 +165,9 @@ pub struct AddRouteCommand {
     base: BaseOptions,
     #[clap(flatten)]
     connection: ConnectionOptions,
+    #[clap(help = "Network to route")]
     net: IpNet,
+    #[clap(help = "Destination IP of this route")]
     via: IpAddr,
 }
 
@@ -167,7 +177,9 @@ pub struct DeleteRouteCommand {
     base: BaseOptions,
     #[clap(flatten)]
     connection: ConnectionOptions,
+    #[clap(help = "Network to route")]
     net: IpNet,
+    #[clap(help = "Destination IP of this route")]
     via: IpAddr,
 }
 
@@ -247,15 +259,15 @@ pub async fn client_manage(manage_opts: ManageCommand) -> anyhow::Result<()> {
                 );
             }
             ManagePeerCommand::Delete(command) => {
-                let id = if let Some(name) = command.peer.name {
+                let id = if let Some(name) = command.peer.name_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::Name(name)),
                     }
-                } else if let Some(token) = command.peer.token {
+                } else if let Some(token) = command.peer.token_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::Token(token.as_bytes().to_vec())),
                     }
-                } else if let Some(pubkey) = command.peer.public_key {
+                } else if let Some(pubkey) = command.peer.public_key_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::PublicKey(
                             decode(pubkey).expect("Could not decode base64 of public key"),
@@ -270,15 +282,15 @@ pub async fn client_manage(manage_opts: ManageCommand) -> anyhow::Result<()> {
                 println!("{:?}", result.into_inner());
             }
             ManagePeerCommand::Change(change) => {
-                let id = if let Some(name) = change.peer.name {
+                let id = if let Some(name) = change.peer.name_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::Name(name)),
                     }
-                } else if let Some(token) = change.peer.token {
+                } else if let Some(token) = change.peer.token_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::Token(token.as_bytes().to_vec())),
                     }
-                } else if let Some(pubkey) = change.peer.public_key {
+                } else if let Some(pubkey) = change.peer.public_key_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::PublicKey(
                             decode(pubkey).expect("Could not decode base64 of public key"),
@@ -290,7 +302,7 @@ pub async fn client_manage(manage_opts: ManageCommand) -> anyhow::Result<()> {
 
                 let request = ChangePeerRequest {
                     id: Some(id),
-                    what: Some(change_peer_request::What::Endpoint(change.endpoint.into())),
+                    what: Some(change_peer_request::What::Endpoint(change.new_endpoint.into())),
                 };
                 let mut client = connect(change.connection).await?;
                 let result = client.change_peer(request).await?;

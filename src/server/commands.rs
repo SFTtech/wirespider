@@ -4,7 +4,7 @@ use std::{net::SocketAddr, str::FromStr};
 use crate::server::protocol::WirespiderServerState;
 
 use anyhow::Context;
-use clap::{ArgEnum, Args, Subcommand};
+use clap::{ArgEnum, Args, Subcommand, ValueHint};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_graceful_shutdown::Toplevel;
 use tracing::metadata::LevelFilter;
@@ -34,34 +34,36 @@ static MIGRATOR: Migrator = sqlx::migrate!();
 pub struct RunCommand {
     #[clap(flatten)]
     base: BaseOptions,
-    #[clap(short, long, default_value = "0.0.0.0:49582")]
+    #[clap(short, long, default_value = "0.0.0.0:49582", help = "IP:PORT to listen on")]
     pub bind: SocketAddr,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ManageCommand {
+pub enum DatabaseCommand {
     #[clap(name = "create-admin")]
     CreateAdmin(CreateAdminCommand),
 
-    #[clap(name = "network", subcommand)]
+    #[clap(flatten)]
     Network(NetworkCommand),
 
-    #[clap(name = "migrate")]
+    #[clap(name = "migrate", about = "Run database migrations")]
     Migrate,
 }
 
 #[derive(Debug, Subcommand)]
-#[clap(rename_all = "snake")]
 pub enum NetworkCommand {
+    #[clap(name = "create-network", about = "Create network")]
     Create(CreateNetworkCommand),
+    #[clap(name = "delete-network", about = "Delete network")]
     Delete(ParamIPNet),
 }
 
 #[derive(Debug, Args)]
-#[clap(rename_all = "snake")]
+#[clap(about = "create a new network")]
 pub struct CreateNetworkCommand {
+    #[clap(help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
     network: IpNet,
-    #[clap(arg_enum, default_value_t = NetworkType::Wireguard)]
+    #[clap(arg_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
     network_type: NetworkType,
 }
 
@@ -73,33 +75,27 @@ enum NetworkType {
 
 #[derive(Debug, Args)]
 pub struct ParamIPNet {
-    #[clap(required = true, parse(try_from_str))]
+    #[clap(required = true, parse(try_from_str), help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
     pub ipnet: IpNet,
 }
 
 #[derive(Debug, Args)]
+#[clap(about = "create a new admin account")]
 pub struct CreateAdminCommand {
-    #[clap(required = true)]
+    #[clap(required = true, help = "Name of the admin")]
     pub name: String,
-    #[clap(required = true, min_values = 1)]
+    #[clap(required = true, min_values = 1, help = "IPs to assign to this admin")]
     pub addresses: Vec<IpNet>,
 }
 
-#[derive(Debug, Subcommand)]
-pub enum Command {
-    #[clap(name = "run")]
-    Run(RunCommand),
-    #[clap(name = "manage", subcommand)]
-    Manage(ManageCommand),
-}
 
 #[derive(Debug, Args)]
 pub struct BaseOptions {
     // enable debug
-    #[clap(long)]
+    #[clap(long, help = "Enable debug output")]
     pub debug: bool,
 
-    #[clap(short('d'), long, env = "DATABASE_URL")]
+    #[clap(short('d'), long, env, value_hint = ValueHint::Url, help = "URL to database. Needs to start with \"sqlite:\"")]
     pub database_url: String,
 }
 
@@ -144,16 +140,16 @@ async fn tonic_service(subsys: SubsystemHandle, bind: SocketAddr) -> anyhow::Res
 
 
 #[instrument]
-pub async fn server_manage(opt: ManageCommand) -> anyhow::Result<()> {
+pub async fn server_manage(opt: DatabaseCommand) -> anyhow::Result<()> {
     let options =
         SqliteConnectOptions::from_str(&env::var("DATABASE_URL").unwrap())?.create_if_missing(true);
     let pool = SqlitePool::connect_with(options).await?;
     match opt {
-        ManageCommand::Migrate => {
+        DatabaseCommand::Migrate => {
             MIGRATOR.run(&pool).await?;
             Ok(())
         }
-        ManageCommand::CreateAdmin(CreateAdminCommand { name, addresses }) => {
+        DatabaseCommand::CreateAdmin(CreateAdminCommand { name, addresses }) => {
             // find networks for addresses
             let mut networkid_map: HashMap<IpNet, i64> = HashMap::new();
             let mut addr_network_map: HashMap<IpNet, IpNet> = HashMap::new();
@@ -200,7 +196,7 @@ pub async fn server_manage(opt: ManageCommand) -> anyhow::Result<()> {
             println!("Created admin with token: {}", uuid);
             Ok(())
         }
-        ManageCommand::Network(NetworkCommand::Create(x)) => {
+        DatabaseCommand::Network(NetworkCommand::Create(x)) => {
             let network_type = match x.network_type {
                 NetworkType::Vxlan => "vxlan",
                 NetworkType::Wireguard => "wireguard",
@@ -223,7 +219,7 @@ pub async fn server_manage(opt: ManageCommand) -> anyhow::Result<()> {
             println!("Created network {}", x.network);
             Ok(())
         }
-        ManageCommand::Network(NetworkCommand::Delete(x)) => {
+        DatabaseCommand::Network(NetworkCommand::Delete(x)) => {
             let query = sqlx::query(
                 r#"
                             DELETE FROM networks WHERE network=? AND ipv6=?
