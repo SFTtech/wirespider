@@ -21,7 +21,7 @@ wireguard-uapi = "2.0.2"
 
 # grpc
 tonic = { version = "0.6", features = ["tls", "tls-webpki-roots"]}
-prost = "0.9"
+prost = "0.10"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
