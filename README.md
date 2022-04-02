@@ -7,6 +7,7 @@ Wirespider consists of a server and a client. The server is responsible of pushi
 * Distribute routes to all clients
 * RFC 5780 NAT detection
 * NAT hole punching or relay over other nodes when not possible
+* detect other nodes in the same network
 
 
 ## How to run the client
@@ -33,12 +34,12 @@ sudo cp target/release/wirespider /usr/bin
 sudo adduser --system --group --home /var/lib/wirespider wirespider
 
 # create database
-wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage migrate
+wirespider database migrate -d sqlite:/var/lib/wirespider/config.sqlite
 # create a ip network for the clients
-wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage network create 10.1.2.0/24
+wirespider database create-network -d sqlite:/var/lib/wirespider/config.sqlite 10.1.2.0/24
 # add admin with ip in this new network
-# the command will return a token you can use with wirespider client
-wirespider server -d sqlite:/var/lib/wirespider/config.sqlite manage create-admin admin 10.1.2.1/24
+# the command will return a token you can use with wirespider start-client and wirespider send-command
+wirespider database create-admin -d sqlite:/var/lib/wirespider/config.sqlite admin 10.1.2.1/24
 
 
 sudo cp systemd/system/wirespider-server.service /etc/systemd/system
@@ -46,7 +47,7 @@ sudo cp systemd/system/wirespider-server.service /etc/systemd/system
 sudo systemctl enable --now wirespider-server.service
 ```
 
-The admin can now use the `wirespider client manage` commands to create other peers and routes
+The admin can now use the `wirespider send-command` commands to create other peers and routes
 
 ### Contact
 

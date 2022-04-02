@@ -78,6 +78,7 @@ prost-build = { version = "0.9" }
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
+depends = "$auto, wireguard-tools, iproute2"
 assets = [
     ["target/release/wirespider", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/wirespider/README", "644"],

@@ -8,7 +8,7 @@ StartLimitBurst=1
 Type=simple
 Restart=on-failure
 EnvironmentFile=/etc/wirespider/%i
-ExecStart=/usr/bin/wirespider client start --device %i
+ExecStart=/usr/bin/wirespider start-client --device %i
 
 [Install]
 WantedBy=multi-user.target
