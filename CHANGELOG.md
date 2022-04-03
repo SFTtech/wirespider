@@ -1,3 +1,6 @@
+# Version 0.4.2
+* another fix for local peer discovery
+
 # Version 0.4.1
 * fix for blocking on local peer discovery
 
