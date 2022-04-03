@@ -8,6 +8,7 @@ use tempfile::NamedTempFile;
 use tracing::debug;
 use wirespider::WireguardKey;
 
+#[derive(Clone, Debug)]
 pub struct WireguardCommandLineInterface {
     device_name: String,
     addresses: Vec<IpNet>,

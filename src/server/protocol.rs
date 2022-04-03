@@ -306,6 +306,7 @@ impl WirespiderServerState {
             let local_ips = result
             .get::<&str, &str>("local_ips")
             .split(',')
+            .filter(|x| !x.is_empty())
             .map(IpAddr::from_str)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| Status::internal("local IP error"))?;
@@ -508,6 +509,7 @@ impl Wirespider for WirespiderServerState {
         let local_port : u16 = request.get_ref().local_port.try_into().map_err(|_| Status::invalid_argument("Invalid local port"))?;
 
         // TODO: do not allow updating key to be the same as an existing entry
+        debug!("getting peer data");
         let peer_query =
             sqlx::query(r#"SELECT pubkey, current_endpoint, local_ips, local_port FROM peers WHERE peerid=?"#)
                 .bind(auth_peer.peerid)
@@ -516,6 +518,7 @@ impl Wirespider for WirespiderServerState {
                 .into_status()?;
         let old_pubkey = peer_query.get::<Option<&[u8]>, &str>("pubkey");
         if old_pubkey != Some(&publickey[0..32]) {
+            debug!("updating peer data");
             updated = true;
             eventtype = EventType::New;
             if old_pubkey.is_some() {
@@ -539,6 +542,8 @@ impl Wirespider for WirespiderServerState {
             .await
             .into_status()?;
         }
+
+        debug!("checking local_port");
         let old_local_port = peer_query.try_get::<u16,&str>("local_port").into_status()?;
         if old_local_port != local_port {
             // no need to send update to peers, so do not set updated flag
@@ -574,6 +579,7 @@ impl Wirespider for WirespiderServerState {
         }
 
         // local ips
+        debug!("checking local_ips");
         let old_local_ips = peer_query
             .get::<&str, &str>("local_ips")
             .split(',')
@@ -632,11 +638,14 @@ impl Wirespider for WirespiderServerState {
                 result.get::<&str, &str>("network")
             );
         }
+        debug!("comparing local_ips to networks");
         new_local_ips.retain(|x| !match x {
             IpAddr::V4(net) => ip4range.contains(net),
             IpAddr::V6(net) => ip6range.contains(net),
         });
+        debug!("final local ips: {:?}", new_local_ips);
         if new_local_ips != old_local_ips {
+            debug!("updating local ips");
             sqlx::query(r#"UPDATE peers SET local_ips=? WHERE peerid=?"#)
                 .bind(new_local_ips.iter().map(IpAddr::to_string).join(","))
                 .bind(auth_peer.peerid)
@@ -650,8 +659,9 @@ impl Wirespider for WirespiderServerState {
             .await
             .map_err(|_| Status::internal("allowed IP error"))?;
         let reply = AddressReply::new(&final_addresses, &overlay_ips);
-
+        
         if updated {
+            debug!("update triggered");
             let peer = self
                 .get_peer_from_peerid(auth_peer.peerid)
                 .await?

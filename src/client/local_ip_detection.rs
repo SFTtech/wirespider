@@ -1,4 +1,4 @@
-use std::net::{IpAddr, SocketAddr};
+use std::{net::{IpAddr, SocketAddr}, time::Duration};
 
 use tokio::net::UdpSocket;
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -7,6 +7,7 @@ use tokio::io::Error;
 use tracing::instrument;
 use tracing_unwrap::ResultExt;
 use wirespider::WireguardKey;
+use tokio::time::timeout;
 
 const MESSAGE : &str = "wirespider";
 
@@ -31,12 +32,17 @@ pub async fn local_ip_detection_service(subsys: SubsystemHandle, key: WireguardK
 
 #[instrument]
 pub async fn check_local_ips(ips: &[IpAddr], key: WireguardKey) -> Result<Option<IpAddr>,Error> {
-    let results = join_all(ips.iter().map(|x| check_ip(*x, key))).await;
-    for result in results {
-        match result? {
-            Some(ip) => return Ok(Some(ip)),
-            None => continue,
-        };
+    let results = timeout(Duration::from_millis(100), join_all(ips.iter().map(|x| check_ip(*x, key)))).await;
+    match results {
+        Ok(results) => {
+            for result in results {
+                match result? {
+                    Some(ip) => return Ok(Some(ip)),
+                    None => continue,
+                };
+            }
+        },
+        Err(_) => return Ok(None)
     }
     Ok(None)
 }
@@ -50,6 +56,7 @@ async fn check_ip(ip: IpAddr, key: WireguardKey) -> Result<Option<IpAddr>,Error>
     socket.connect(SocketAddr::from((ip, 27212))).await?;
     socket.send(MESSAGE.as_bytes()).await?;
     let mut buffer : WireguardKey = [0; 32];
+
     match socket.recv(&mut buffer).await {
         Ok(size) if size == 32 && buffer == key => Ok(Some(ip)),
         _ => Ok(None)
