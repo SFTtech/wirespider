@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use tonic::codegen::Body;
-use tonic::codegen::StdError;
+use tonic::codegen::InterceptedService;
+use tonic::transport::Channel;
 use wirespider::protocol::change_peer_request::What;
 use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::peer_identifier::Identifier;
@@ -15,6 +15,8 @@ use tokio_stream::wrappers::IntervalStream;
 use wireguard_uapi::DeviceInterface;
 use wireguard_uapi::WgSocket;
 
+use super::WirespiderInterceptor;
+
 pub(crate) struct Monitor {
     interface: String,
 }
@@ -24,12 +26,7 @@ impl Monitor {
         Monitor { interface }
     }
 
-    pub async fn monitor<T>(&self, state: &ClientState, client: &mut WirespiderClient<T>)
-    where
-        T: tonic::client::GrpcService<tonic::body::BoxBody>,
-        T::ResponseBody: Body + Send + 'static,
-        T::Error: Into<StdError>,
-        <T::ResponseBody as Body>::Error: Into<StdError> + Send,
+    pub async fn monitor(&self, state: &ClientState, client: &mut WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>)
     {
         let mut stream = IntervalStream::new(interval(Duration::from_secs(1)));
         while stream.next().await.is_some() {

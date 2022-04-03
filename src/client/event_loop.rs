@@ -22,7 +22,7 @@ use crate::client::{
 };
 use futures::TryStreamExt;
 
-use super::StartCommand;
+use crate::cli::ClientStartCommand;
 
 use thiserror::Error;
 
@@ -38,7 +38,7 @@ pub enum EventLoopError {
     IO(#[from] std::io::Error),
 }
 
-pub async fn event_loop(subsys: SubsystemHandle, start_opts: StartCommand) -> Result<(), EventLoopError> {
+pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
     let mut rng = OsRng::default();
     // delete the existing device, so we do not disturb the nat detection

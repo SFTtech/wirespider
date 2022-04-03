@@ -1,4 +1,9 @@
+use clap::IntoApp;
 use prost_build::Config;
+use clap_complete::{generate_to, shells::Bash, shells::Zsh};
+use std::fs::create_dir;
+
+include!("src/cli.rs");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = Config::new();
@@ -11,5 +16,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.field_attribute("wirespider.Peer.tunnel_ips", "#[builder(setter(transform = |tunnel_ips: Vec<IpAddr>| tunnel_ips.into_iter().map(Ip::from).collect()))]");
     config.field_attribute("wirespider.Peer.local_ips", "#[builder(setter(transform = |local_ips: Vec<IpAddr>| local_ips.into_iter().map(Ip::from).collect()))]");
     tonic_build::configure().compile_with_config(config, &["proto/wirespider.proto"], &["proto/"]).expect("Could not compile proto files");
+
+    let mut cmd = Cli::command();
+
+    let outdir = "completions";
+
+    match create_dir(outdir) {
+        Ok(()) => {},
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {},
+            _ => return Err(e.into()),
+        } 
+    }
+
+    generate_to(
+        Bash,
+        &mut cmd, // We need to specify what generator to use
+        "wirespider",  // We need to specify the bin name manually
+        outdir,   // We need to specify where to write to
+    )?;
+    generate_to(
+        Zsh,
+        &mut cmd, // We need to specify what generator to use
+        "wirespider",  // We need to specify the bin name manually
+        outdir,   // We need to specify where to write to
+    )?;
     Ok(())
 }

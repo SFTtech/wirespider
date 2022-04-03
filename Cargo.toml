@@ -1,13 +1,11 @@
 [package]
 name = "wirespider"
-version = "0.3.1"
+version = "0.4.0"
 authors = ["Linus Karl <linus@lotz.li>"]
 license = "GPL-3"
 edition = "2021"
 readme = "README.md"
 description = "Wirespider distributes wireguard tunnel configurations and routes"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 clap = { version = "3.1.8", features = ["derive","env"] }
@@ -20,8 +18,8 @@ x25519-dalek-ng = "1.1"
 wireguard-uapi = "2.0.2"
 
 # grpc
-tonic = { version = "0.6", features = ["tls", "tls-webpki-roots"]}
-prost = "0.9"
+tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
+prost = "0.10.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
@@ -32,7 +30,7 @@ typed-builder = "0.10.0"
 sqlx = { version = "0.5", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.13"
 rand = { version = "0.8", features = ["getrandom"] }
-ipnet = "2.3"
+ipnet = "2.4"
 iprange = "0.6.7"
 eui48 = "1.1.0"
 uuid = { version = "0.8", features = ["v4"] }
@@ -61,19 +59,16 @@ tokio-graceful-shutdown = "0.5"
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
 
 [build-dependencies]
-tonic-build = { version = "0.6" }
-prost-build = { version = "0.9" }
+tonic-build = { version = "0.7" }
+prost-build = { version = "0.10" }
+clap = { version = "3.1.8", features = ["derive","env"] }
+clap_complete = "3.1.1"
+uuid = "0.8.2"
+ipnet = "2.4.0"
+tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
 
-# [profile.release]
-# opt-level = 3
-# debug = false
-# rpath = false
-# lto = true
-# debug-assertions = false
-# codegen-units = 1
-# panic = 'unwind'
-# incremental = false
-# overflow-checks = false
+[profile.release]
+strip = "symbols"
 
 
 [package.metadata.deb]
@@ -85,5 +80,23 @@ assets = [
     ["CHANGELOG.md", "usr/share/doc/wirespider/CHANGELOG", "644"],
     ["systemd/system/wirespider-client@.service", "lib/systemd/system/", "644"],
     ["systemd/system/wirespider-server.service", "lib/systemd/system/", "644"],
-    ["systemd/wirespider/wg0", "etc/wirespider/", "644"],
+    ["systemd/wirespider/wg0", "etc/wirespider/wg0-example", "644"],
+    ["completions/_wirespider", "usr/share/zsh/site-functions/", "644"],
+    ["completions/wirespider.bash", "usr/share/bash-completion/completions/wirespider", "644"],
+]
+
+[package.metadata.generate-rpm.requires]
+wireguard-tools = "*"
+iproute2 = "*"
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/wirespider", dest = "/usr/bin/", mode = "0755" },
+    { source = "README.md", dest = "/usr/share/doc/wirespider/README", mode = "644" },
+    { source = "CHANGELOG.md", dest = "/usr/share/doc/wirespider/CHANGELOG", mode = "644" },
+    { source = "systemd/system/wirespider-client@.service", dest = "/lib/systemd/system/wirespider-client@.service", mode = "644" },
+    { source = "systemd/system/wirespider-server.service", dest = "/lib/systemd/system/wirespider-server.service", mode = "644" },
+    { source = "systemd/wirespider/wg0", dest = "/etc/wirespider/wg0-example", mode = "644" },
+    { source = "completions/_wirespider", dest = "/usr/share/zsh/site-functions/_wirespider", mode = "644" },
+    { source = "completions/wirespider.bash", dest = "/usr/share/bash-completion/completions/wirespider", mode = "644" },
 ]
