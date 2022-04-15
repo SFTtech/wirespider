@@ -1,0 +1,116 @@
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    name: Rust ${{ matrix.rust }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+#          - os: macos-latest
+#            target: x86_64-apple-darwin
+#            suffix: ''
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            arch-deb: amd64
+            arch-rpm: x86_64
+            suffix: ''
+#          - os: windows-latest
+#            target: x86_64-pc-windows-msvc
+#            suffix: .exe
+    env:
+      RUST_BACKTRACE: full
+      RUSTV: stable
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: rustfmt
+          override: true
+      - name: Cache tools
+        uses: actions/cache@v2
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-release
+          restore-keys: |
+            ${{ runner.os }}-registry
+      - name: Release build
+        id: build
+        run: cargo build --release
+      - name: Install cargo-get
+        run: cargo install cargo-get
+      - name: Version
+        run: echo "::set-output name=version::$(cargo get version)"
+        id: version
+      - name: Changelog
+        uses: Bullrich/generate-release-changelog@master
+        id: changelog
+        env:
+          REPO: ${{ github.repository }}
+      - name: Create Release
+        uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: false
+          prerelease: true
+          release_name: ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref }}
+          body: |
+            ${{ steps.changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Upload release binary artifact
+        uses: actions/upload-artifact@master
+        with:
+          name: wirespider-${{ matrix.target }}
+          path:  ./target/release/wirespider${{ matrix.suffix }}
+      - name: Upload release binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/release/wirespider${{ matrix.suffix }}
+          asset_name: wirespider-${{ steps.version.outputs.version }}-${{ matrix.arch-deb }}
+          asset_content_type: application/x-pie-executable; charset=binary
+      - name: Install cargo-deb
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        run: cargo install cargo-deb
+      - name: Create deb
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        run: cargo deb
+      - name: Upload deb to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/debian/wirespider_${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
+          asset_name: wirespider-${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
+          asset_content_type: application/vnd.debian.binary-package; charset=binary
+      - name: Install cargo-generate-rpm
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        run: cargo install cargo-generate-rpm
+      - name: Create rpm
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        run: cargo generate-rpm
+      - name: Upload rpm to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./target/generate-rpm/wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
+          asset_name: wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
+          asset_content_type: application/x-rpm; charset=binary

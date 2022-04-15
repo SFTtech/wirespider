@@ -70,9 +70,3 @@ jobs:
         run: cargo clippy
       - name: Test
         run: cargo test
-      - name: Build
-        run: cargo build --release
-      - uses: actions/upload-artifact@master
-        with:
-          name: wirespider-${{ matrix.target }}
-          path:  ./target/release/wirespider${{ matrix.suffix }}
