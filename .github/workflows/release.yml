@@ -1,3 +1,4 @@
+name: Release
 on:
   push:
     tags:
@@ -28,26 +29,47 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install Rust
+        id: rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
           components: rustfmt
           override: true
-      - name: Cache tools
+      - name: Install cargo-get
+        uses: baptiste0928/cargo-install@v1
+        with:
+          crate: cargo-get
+      - name: Install cargo-deb
+        uses: baptiste0928/cargo-install@v1
+        with:
+          crate: cargo-deb
+      - name: Install cargo-generate-rpm
+        uses: baptiste0928/cargo-install@v1
+        with:
+          crate: cargo-generate-rpm
+      - name: Cargo Cache
         uses: actions/cache@v2
+        id: cache
         continue-on-error: false
         with:
           path: |
-            ~/.cargo/
+            ~/.cargo/registry/
+            target/
           key: ${{ runner.os }}-cargo-release
           restore-keys: |
             ${{ runner.os }}-registry
       - name: Release build
         id: build
         run: cargo build --release
-      - name: Install cargo-get
-        run: cargo install cargo-get
+      - name: Create rpm
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        id: rpm-generate
+        run: cargo generate-rpm
+      - name: Create deb
+        id: deb-generate
+        if: ${{ matrix.os }} == "ubuntu-latest"
+        run: cargo deb
       - name: Version
         run: echo "::set-output name=version::$(cargo get version)"
         id: version
@@ -58,7 +80,7 @@ jobs:
           REPO: ${{ github.repository }}
       - name: Create Release
         uses: actions/create-release@v1
-        id: create_release
+        id: create-release
         with:
           draft: false
           prerelease: false
@@ -68,47 +90,46 @@ jobs:
             ${{ steps.changelog.outputs.changelog }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - name: Upload release binary artifact
-        uses: actions/upload-artifact@master
+      - name: Upload deb to release
+        id: deb-release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          name: wirespider-${{ matrix.target }}
-          path:  ./target/release/wirespider${{ matrix.suffix }}
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./target/debian/wirespider_${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
+          asset_name: wirespider-${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
+          asset_content_type: application/vnd.debian.binary-package; charset=binary
+      - name: Upload rpm to release
+        id: rpm-release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./target/generate-rpm/wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
+          asset_name: wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
+          asset_content_type: application/x-rpm; charset=binary
       - name: Upload release binary to release
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
           asset_path: ./target/release/wirespider${{ matrix.suffix }}
           asset_name: wirespider-${{ steps.version.outputs.version }}-${{ matrix.arch-deb }}
           asset_content_type: application/x-pie-executable; charset=binary
-      - name: Install cargo-deb
-        if: ${{ matrix.os }} == "ubuntu-latest"
-        run: cargo install cargo-deb
-      - name: Create deb
-        if: ${{ matrix.os }} == "ubuntu-latest"
-        run: cargo deb
-      - name: Upload deb to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Update APT repo
+        uses: peternewman/apt-repo-action@globs
+        id: apt-repo
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./target/debian/wirespider_${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
-          asset_name: wirespider-${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
-          asset_content_type: application/vnd.debian.binary-package; charset=binary
-      - name: Install cargo-generate-rpm
-        if: ${{ matrix.os }} == "ubuntu-latest"
-        run: cargo install cargo-generate-rpm
-      - name: Create rpm
-        if: ${{ matrix.os }} == "ubuntu-latest"
-        run: cargo generate-rpm
-      - name: Upload rpm to release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./target/generate-rpm/wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
-          asset_name: wirespider-${{ steps.version.outputs.version }}-1.${{ matrix.arch-rpm }}.rpm
-          asset_content_type: application/x-rpm; charset=binary
+          github_token: ${{ github.token }}
+          repo_supported_arch: |
+            amd64
+            i386
+          repo_supported_version: stable
+          file: ./target/debian/wirespider_${{ steps.version.outputs.version }}_${{ matrix.arch-deb }}.deb
+          file_target_version: stable
+          public_key: ${{ secrets.APT_REPO_PUBKEY }}
+          private_key: ${{ secrets.APT_REPO_PRIVKEY }}
+          key_passphrase: ${{ secrets.APT_REPO_KEY_PASSPHRASE }}
