@@ -5,6 +5,7 @@ Wirespider consists of a server and a client. The server is responsible of pushi
 ## Features
 * Distribute Wireguard tunnel configuration
 * Distribute routes to all clients
+* Create VXLAN overlay network for layer 2 networking
 * RFC 5780 NAT detection
 * NAT hole punching or relay over other nodes when not possible
 * detect other nodes in the same network
