@@ -40,16 +40,17 @@ jobs:
           toolchain: ${{ matrix.rust }}
           profile: minimal
           override: true
-      - name: Cache cargo registry
+      - name: Cache registry, build data
         uses: actions/cache@v2
         continue-on-error: false
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ./target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo
       - name: Test
         run: cargo test
       - name: Build
