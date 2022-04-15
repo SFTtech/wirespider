@@ -4,12 +4,14 @@ pub mod protocol {
     #![allow(non_camel_case_types)]
     tonic::include_proto!("wirespider"); // The string specified here must match the proto package name
 
-    use std::net::SocketAddr;
-    use std::{convert::TryInto, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
-    use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-    use tonic::Status;
     use crate::WireguardKey;
-    
+    use ipnet::{IpNet, Ipv4Net, Ipv6Net};
+    use std::net::SocketAddr;
+    use std::{
+        convert::TryInto,
+        net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    };
+    use tonic::Status;
 
     impl TryInto<IpAddr> for &Ip {
         type Error = Status;
@@ -17,13 +19,11 @@ pub mod protocol {
         fn try_into(self) -> Result<IpAddr, Self::Error> {
             match &self.r#type {
                 Some(ip::Type::Ipv4(x)) => Ok(IpAddr::V4(Ipv4Addr::from(*x))),
-                Some(ip::Type::Ipv6(x)) if x.len() == 16 => Ok(IpAddr::V6(
-                    Ipv6Addr::from([
-                        x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7],
-                        x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[15]
-                        ]))
-                ),
-                _ => Err(Status::invalid_argument("Invalid IP"))
+                Some(ip::Type::Ipv6(x)) if x.len() == 16 => Ok(IpAddr::V6(Ipv6Addr::from([
+                    x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11],
+                    x[12], x[13], x[14], x[15],
+                ]))),
+                _ => Err(Status::invalid_argument("Invalid IP")),
             }
         }
     }
@@ -38,8 +38,12 @@ pub mod protocol {
     impl From<&IpAddr> for Ip {
         fn from(ip: &IpAddr) -> Self {
             match ip {
-                IpAddr::V4(x) => Ip {r#type: Some(ip::Type::Ipv4((*x).into()))},
-                IpAddr::V6(x) => Ip {r#type: Some(ip::Type::Ipv6(x.octets().to_vec()))}
+                IpAddr::V4(x) => Ip {
+                    r#type: Some(ip::Type::Ipv4((*x).into())),
+                },
+                IpAddr::V6(x) => Ip {
+                    r#type: Some(ip::Type::Ipv6(x.octets().to_vec())),
+                },
             }
         }
     }
@@ -54,7 +58,7 @@ pub mod protocol {
         pub fn new(to: IpNet, via: IpAddr) -> Route {
             Route {
                 to: Some(to.into()),
-                via: Some(via.into())
+                via: Some(via.into()),
             }
         }
     }
@@ -63,8 +67,14 @@ pub mod protocol {
         type Error = Status;
 
         fn try_into(self) -> Result<SocketAddr, Self::Error> {
-            let port = self.port.try_into().map_err(|_| Status::invalid_argument("Invalid IP"))?;
-            let ip = self.ip.ok_or_else(|| Status::invalid_argument("Invalid IP"))?.try_into()?;
+            let port = self
+                .port
+                .try_into()
+                .map_err(|_| Status::invalid_argument("Invalid IP"))?;
+            let ip = self
+                .ip
+                .ok_or_else(|| Status::invalid_argument("Invalid IP"))?
+                .try_into()?;
             Ok(SocketAddr::new(ip, port))
         }
     }
@@ -73,29 +83,34 @@ pub mod protocol {
         fn from(socket_addr: SocketAddr) -> Self {
             Endpoint {
                 ip: Some(socket_addr.ip().into()),
-                port: socket_addr.port().into()
+                port: socket_addr.port().into(),
             }
         }
     }
-
 
     impl TryInto<IpNet> for &Network {
         type Error = Status;
 
         fn try_into(self) -> Result<IpNet, Self::Error> {
-            let ip = self.ip.as_ref().ok_or_else(|| Status::invalid_argument("Invalid IP"))?
-                                .try_into()?;
+            let ip = self
+                .ip
+                .as_ref()
+                .ok_or_else(|| Status::invalid_argument("Invalid IP"))?
+                .try_into()?;
             let prefix_len = self.prefix_len;
             match ip {
-                IpAddr::V4(x) if prefix_len <= 32 => Ok(IpNet::V4(Ipv4Net::new(x, prefix_len.try_into().unwrap())
-                                                                .map_err(|_| Status::invalid_argument("Invalid IP"))?)),
-                IpAddr::V6(x) if prefix_len <= 128 => Ok(IpNet::V6(Ipv6Net::new(x, prefix_len.try_into().unwrap())
-                                                                .map_err(|_| Status::invalid_argument("Invalid IP"))?)),
-                _ => Err(Status::invalid_argument("Invalid Network prefix"))
+                IpAddr::V4(x) if prefix_len <= 32 => Ok(IpNet::V4(
+                    Ipv4Net::new(x, prefix_len.try_into().unwrap())
+                        .map_err(|_| Status::invalid_argument("Invalid IP"))?,
+                )),
+                IpAddr::V6(x) if prefix_len <= 128 => Ok(IpNet::V6(
+                    Ipv6Net::new(x, prefix_len.try_into().unwrap())
+                        .map_err(|_| Status::invalid_argument("Invalid IP"))?,
+                )),
+                _ => Err(Status::invalid_argument("Invalid Network prefix")),
             }
         }
     }
-
 
     impl TryInto<IpNet> for Network {
         type Error = Status;
@@ -118,16 +133,21 @@ pub mod protocol {
         pub fn new(net: &[IpNet], overlay: &[IpNet]) -> AddressReply {
             AddressReply {
                 address: net.iter().map(|x| (*x).into()).collect::<Vec<Network>>(),
-                overlay_ips: overlay.iter().map(|x| (*x).into()).collect::<Vec<Network>>()
+                overlay_ips: overlay
+                    .iter()
+                    .map(|x| (*x).into())
+                    .collect::<Vec<Network>>(),
             }
         }
     }
-    
-    impl Peer {
 
+    impl Peer {
         pub fn pub_key(&self) -> WireguardKey {
             if self.wg_public_key.len() != 32 {
-                panic!("Invalid wireguard public key length: {}", self.wg_public_key.len());
+                panic!(
+                    "Invalid wireguard public key length: {}",
+                    self.wg_public_key.len()
+                );
             }
             self.wg_public_key.as_slice().try_into().unwrap()
         }
@@ -147,9 +167,7 @@ pub mod protocol {
 
     impl PeersReply {
         pub fn new(peers: Vec<Peer>) -> PeersReply {
-            PeersReply {
-                peers
-            }
+            PeersReply { peers }
         }
     }
 
@@ -158,8 +176,7 @@ pub mod protocol {
             Event {
                 id,
                 r#type: event_type.into(),
-                target: Some(peer.into())
-
+                target: Some(peer.into()),
             }
         }
 
@@ -167,10 +184,8 @@ pub mod protocol {
             Event {
                 id,
                 r#type: event_type.into(),
-                target: Some(route.into())
-
+                target: Some(route.into()),
             }
         }
     }
 }
-

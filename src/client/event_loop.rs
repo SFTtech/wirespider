@@ -1,4 +1,4 @@
-use std::{time::Duration, net::SocketAddr};
+use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
 use base64::{decode, encode};
@@ -15,7 +15,12 @@ use wirespider::{
 };
 use x25519_dalek_ng::{PublicKey, StaticSecret};
 
-use crate::client::{DefaultOverlayInterface, connect, interface::OverlayManagementInterface, local_ip_detection::{check_local_ips, local_ip_detection_service}};
+use crate::client::{
+    connect,
+    interface::OverlayManagementInterface,
+    local_ip_detection::{check_local_ips, local_ip_detection_service},
+    DefaultOverlayInterface,
+};
 use crate::client::{
     interface::WireguardManagementInterface, monitor, nat::get_nat_type, DefaultWireguardInterface,
     CLIENT_STATE,
@@ -38,7 +43,10 @@ pub enum EventLoopError {
     IO(#[from] std::io::Error),
 }
 
-pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand) -> Result<(), EventLoopError> {
+pub async fn event_loop(
+    subsys: SubsystemHandle,
+    start_opts: ClientStartCommand,
+) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
     let mut rng = OsRng::default();
     // delete the existing device, so we do not disturb the nat detection
@@ -87,7 +95,9 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand)
     };
     let pubkey = PublicKey::from(&private_key).to_bytes();
     debug!("Starting local ip detection endpoint subsystem");
-    subsys.start("LocalIpEndpoint", move |x| local_ip_detection_service(x, pubkey));
+    subsys.start("LocalIpEndpoint", move |x| {
+        local_ip_detection_service(x, pubkey)
+    });
 
     let (external_address, nat_type) = nat_detection
         .await
@@ -109,9 +119,10 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand)
             }),
             endpoint: external_address.map(|x| x.into()),
             local_ips,
-            local_port: port.get().into()
+            local_port: port.get().into(),
         })
-        .await.unwrap_or_log()
+        .await
+        .unwrap_or_log()
         .into_inner();
     debug!("{:?}", address_reply);
     let address_list: Vec<IpNet> = address_reply
@@ -195,7 +206,7 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand)
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&pubkey[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
-                                
+
                                 debug!("getting local ips");
                                 let local_ips = peer.local_ips.iter().map(|x| x.try_into()).collect::<Result<Vec<_>,_>>().unwrap_or_log();
                                 let local_ip = check_local_ips(&local_ips, pubkey).await.unwrap_or_log();
@@ -204,7 +215,7 @@ pub async fn event_loop(subsys: SubsystemHandle, start_opts: ClientStartCommand)
                                     None => endpoint,
                                 };
                                 debug!("Got endpoint: {:?}", endpoint);
-        
+
                                 let allowed_ips: Vec<IpNet> = peer
                                     .allowed_ips
                                     .into_iter()

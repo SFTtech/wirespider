@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use wirespider::protocol::change_peer_request::What;
-use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::peer_identifier::Identifier;
+use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::ChangePeerRequest;
 use wirespider::protocol::PeerIdentifier;
 
@@ -26,8 +26,11 @@ impl Monitor {
         Monitor { interface }
     }
 
-    pub async fn monitor(&self, state: &ClientState, client: &mut WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>)
-    {
+    pub async fn monitor(
+        &self,
+        state: &ClientState,
+        client: &mut WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>,
+    ) {
         let mut stream = IntervalStream::new(interval(Duration::from_secs(1)));
         while stream.next().await.is_some() {
             let interface = self.interface.clone();

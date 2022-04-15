@@ -304,38 +304,34 @@ impl WirespiderServerState {
             let overlay_ips = self.get_overlay_ips(result.get("peerid")).await?;
             let tunnel_ips = self.get_tunnel_ips(result.get("peerid")).await?;
             let local_ips = result
-            .get::<&str, &str>("local_ips")
-            .split(',')
-            .filter(|x| !x.is_empty())
-            .map(IpAddr::from_str)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| Status::internal("local IP error"))?;
+                .get::<&str, &str>("local_ips")
+                .split(',')
+                .filter(|x| !x.is_empty())
+                .map(IpAddr::from_str)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| Status::internal("local IP error"))?;
             let peer_builder = Peer::builder()
-            .wg_public_key(
-                pubkey
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| Status::internal("Invalid pubkey"))?,
-            )
-            .name(result.get("peer_name"))
-            .endpoint(
-                result
-                    .try_get("current_endpoint")
-                    .ok()
-                    .and_then(|x| SocketAddr::from_str(x).ok()),
-            ) //TODO: use current endpoint IP if connected via wireguard to server);
-            .tunnel_ips(tunnel_ips)
-            .allowed_ips(allowed_ips)
-            .overlay_ips(overlay_ips)
-            .node_flags(result.get("monitor"), result.get("relay"))
-            .nat_type(result.get("nat_type"))
-            .local_ips(local_ips)
-            .local_port(result.get("local_port"));
-            events.push(Event::from_peer(
-                0,
-                EventType::New,
-                peer_builder.build(),
-            ));
+                .wg_public_key(
+                    pubkey
+                        .as_slice()
+                        .try_into()
+                        .map_err(|_| Status::internal("Invalid pubkey"))?,
+                )
+                .name(result.get("peer_name"))
+                .endpoint(
+                    result
+                        .try_get("current_endpoint")
+                        .ok()
+                        .and_then(|x| SocketAddr::from_str(x).ok()),
+                ) //TODO: use current endpoint IP if connected via wireguard to server);
+                .tunnel_ips(tunnel_ips)
+                .allowed_ips(allowed_ips)
+                .overlay_ips(overlay_ips)
+                .node_flags(result.get("monitor"), result.get("relay"))
+                .nat_type(result.get("nat_type"))
+                .local_ips(local_ips)
+                .local_port(result.get("local_port"));
+            events.push(Event::from_peer(0, EventType::New, peer_builder.build()));
         }
         info!("Events: {:?}", events);
 
@@ -506,16 +502,21 @@ impl Wirespider for WirespiderServerState {
             .try_into()
             .map_err(|_| Status::internal("invalid key"))?;
 
-        let local_port : u16 = request.get_ref().local_port.try_into().map_err(|_| Status::invalid_argument("Invalid local port"))?;
+        let local_port: u16 = request
+            .get_ref()
+            .local_port
+            .try_into()
+            .map_err(|_| Status::invalid_argument("Invalid local port"))?;
 
         // TODO: do not allow updating key to be the same as an existing entry
         debug!("getting peer data");
-        let peer_query =
-            sqlx::query(r#"SELECT pubkey, current_endpoint, local_ips, local_port FROM peers WHERE peerid=?"#)
-                .bind(auth_peer.peerid)
-                .fetch_one(&self.sqlite_pool)
-                .await
-                .into_status()?;
+        let peer_query = sqlx::query(
+            r#"SELECT pubkey, current_endpoint, local_ips, local_port FROM peers WHERE peerid=?"#,
+        )
+        .bind(auth_peer.peerid)
+        .fetch_one(&self.sqlite_pool)
+        .await
+        .into_status()?;
         let old_pubkey = peer_query.get::<Option<&[u8]>, &str>("pubkey");
         if old_pubkey != Some(&publickey[0..32]) {
             debug!("updating peer data");
@@ -544,17 +545,17 @@ impl Wirespider for WirespiderServerState {
         }
 
         debug!("checking local_port");
-        let old_local_port = peer_query.try_get::<u16,&str>("local_port").into_status()?;
+        let old_local_port = peer_query
+            .try_get::<u16, &str>("local_port")
+            .into_status()?;
         if old_local_port != local_port {
             // no need to send update to peers, so do not set updated flag
-            sqlx::query(
-                r#"UPDATE peers SET local_port=? WHERE peerid=?"#,
-            )
-            .bind(local_port)
-            .bind(auth_peer.peerid)
-            .execute(&self.sqlite_pool)
-            .await
-            .into_status()?;
+            sqlx::query(r#"UPDATE peers SET local_port=? WHERE peerid=?"#)
+                .bind(local_port)
+                .bind(auth_peer.peerid)
+                .execute(&self.sqlite_pool)
+                .await
+                .into_status()?;
         }
         let old_endpoint = peer_query
             .get::<Option<&str>, &str>("current_endpoint")
@@ -659,7 +660,7 @@ impl Wirespider for WirespiderServerState {
             .await
             .map_err(|_| Status::internal("allowed IP error"))?;
         let reply = AddressReply::new(&final_addresses, &overlay_ips);
-        
+
         if updated {
             debug!("update triggered");
             let peer = self

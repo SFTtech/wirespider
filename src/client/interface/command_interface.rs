@@ -3,7 +3,11 @@ use super::interface_trait::{OverlayManagementInterface, WireguardManagementInte
 use base64::encode;
 use eui48::MacAddress;
 use ipnet::IpNet;
-use std::{net::{IpAddr, SocketAddr}, num::NonZeroU16, process::Command};
+use std::{
+    net::{IpAddr, SocketAddr},
+    num::NonZeroU16,
+    process::Command,
+};
 use tempfile::NamedTempFile;
 use tracing::debug;
 use wirespider::WireguardKey;
@@ -26,7 +30,15 @@ impl WireguardManagementInterface for WireguardCommandLineInterface {
         // create interface
         let output = Command::new("ip")
             // mtu 1432 for ipv4+pppoe, needs to be changed when ipv6 support is ready
-            .args(&["link", "add", &device_name, "mtu", "1432", "type", "wireguard"])
+            .args(&[
+                "link",
+                "add",
+                &device_name,
+                "mtu",
+                "1432",
+                "type",
+                "wireguard",
+            ])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -204,9 +216,35 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         debug!("{:?}", output);
     }
 
-    fn create_overlay_device(device_name: String, listen_device: &str, listen_addr: &IpAddr, addresses: Vec<IpNet>, mac_addr: MacAddress) -> Result<Self,Self::Error> {
+    fn create_overlay_device(
+        device_name: String,
+        listen_device: &str,
+        listen_addr: &IpAddr,
+        addresses: Vec<IpNet>,
+        mac_addr: MacAddress,
+    ) -> Result<Self, Self::Error> {
         // create interface
-        let args = &["link", "add", &device_name, "address", &mac_addr.to_hex_string(), "mtu", "1378", "type", "vxlan", "id", "14523699", "dev", listen_device, "local", &listen_addr.to_string(), "dstport", "4789", "nol3miss", "nol2miss"];
+        let args = &[
+            "link",
+            "add",
+            &device_name,
+            "address",
+            &mac_addr.to_hex_string(),
+            "mtu",
+            "1378",
+            "type",
+            "vxlan",
+            "id",
+            "14523699",
+            "dev",
+            listen_device,
+            "local",
+            &listen_addr.to_string(),
+            "dstport",
+            "4789",
+            "nol3miss",
+            "nol2miss",
+        ];
         debug!("running ip {}", args.join(" "));
         let output = Command::new("ip") // note: mtu is dependent on wireguard mtu
             .args(args)
@@ -232,9 +270,24 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         Ok(OverlayCommandLineInterface { device_name })
     }
 
-    fn set_peer(&self, mac_addr: MacAddress, net: IpNet, remote: IpAddr) -> Result<(),Self::Error> {
+    fn set_peer(
+        &self,
+        mac_addr: MacAddress,
+        net: IpNet,
+        remote: IpAddr,
+    ) -> Result<(), Self::Error> {
         // unicast endpoint to fdb
-        let args = &["fdb", "add", &mac_addr.to_hex_string(), "dev", &self.device_name, "dst", &remote.to_string(), "port", "4789"];
+        let args = &[
+            "fdb",
+            "add",
+            &mac_addr.to_hex_string(),
+            "dev",
+            &self.device_name,
+            "dst",
+            &remote.to_string(),
+            "port",
+            "4789",
+        ];
         debug!("running: bridge {}", args.join(" "));
         let output = Command::new("bridge")
             .args(args)
@@ -242,14 +295,32 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             .expect("failed to execute process");
         debug!("{:?}", output);
         // multicast/broadcast
-        let args = &["fdb", "append", "00:00:00:00:00:00", "dev", &self.device_name, "dst", &remote.to_string(), "port", "4789"];
+        let args = &[
+            "fdb",
+            "append",
+            "00:00:00:00:00:00",
+            "dev",
+            &self.device_name,
+            "dst",
+            &remote.to_string(),
+            "port",
+            "4789",
+        ];
         debug!("running: bridge {}", args.join(" "));
         let output = Command::new("bridge")
             .args(args)
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
-        let args = &["neigh", "add", &net.addr().to_string(), "lladdr", &mac_addr.to_hex_string(), "dev", &self.device_name];
+        let args = &[
+            "neigh",
+            "add",
+            &net.addr().to_string(),
+            "lladdr",
+            &mac_addr.to_hex_string(),
+            "dev",
+            &self.device_name,
+        ];
         debug!("running: ip {}", args.join(" "));
         let output = Command::new("ip")
             .args(args)
@@ -262,9 +333,15 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
     fn remove_peer(&self, mac_addr: eui48::MacAddress) -> Result<(), Self::Error> {
         // TODO remove broadcast entry
         let output = Command::new("bridge")
-        .args(&["fdb", "del", &mac_addr.to_hex_string(), "dev", &self.device_name])
-        .output()
-        .expect("failed to execute process");
+            .args(&[
+                "fdb",
+                "del",
+                &mac_addr.to_hex_string(),
+                "dev",
+                &self.device_name,
+            ])
+            .output()
+            .expect("failed to execute process");
         debug!("{:?}", output);
         Ok(())
     }

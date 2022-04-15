@@ -1,7 +1,9 @@
 use std::time::Duration;
 use std::{net::SocketAddr, str::FromStr};
 
-use crate::cli::{ServerRunCommand, ServerDatabaseCommand, CreateAdminCommand, NetworkCommand, NetworkType};
+use crate::cli::{
+    CreateAdminCommand, NetworkCommand, NetworkType, ServerDatabaseCommand, ServerRunCommand,
+};
 use crate::server::protocol::WirespiderServerState;
 
 use anyhow::Context;
@@ -9,8 +11,8 @@ use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_graceful_shutdown::Toplevel;
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
-use tracing_subscriber::Registry;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::Registry;
 
 use std::{collections::HashMap, env};
 
@@ -30,25 +32,30 @@ use sqlx::migrate::Migrator;
 
 static MIGRATOR: Migrator = sqlx::migrate!();
 
-
 pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
-    let log_level = if opt.base.debug {LevelFilter::DEBUG} else {LevelFilter::INFO};
+    let log_level = if opt.base.debug {
+        LevelFilter::DEBUG
+    } else {
+        LevelFilter::INFO
+    };
     // logging
     let subscriber = Registry::default()
         .with(log_level)
         .with(ErrorLayer::default())
         .with(tracing_subscriber::fmt::layer());
-    
-  
+
     tracing::subscriber::set_global_default(subscriber)?;
 
     env::set_var("DATABASE_URL", &opt.base.database_url);
     debug!("Starting");
 
     Toplevel::new()
-        .start("TonicService", move |handle| tonic_service(handle, opt.bind))
+        .start("TonicService", move |handle| {
+            tonic_service(handle, opt.bind)
+        })
         .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000)).await?;
+        .handle_shutdown_requests(Duration::from_millis(1000))
+        .await?;
 
     Ok(())
 }
@@ -67,7 +74,6 @@ async fn tonic_service(subsys: SubsystemHandle, bind: SocketAddr) -> anyhow::Res
     };
     Ok(())
 }
-
 
 #[instrument]
 pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {

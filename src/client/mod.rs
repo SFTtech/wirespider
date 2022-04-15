@@ -3,12 +3,15 @@ use std::time::Duration;
 mod client_state;
 mod endpoint;
 mod event_loop;
-mod local_ip_detection;
 mod interface;
+mod local_ip_detection;
 mod monitor;
 mod nat;
 
-use crate::cli::{ConnectionOptions, ClientManageCommand, ClientManagePeerCommand, ClientManageRouteCommand, ClientStartCommand, BaseOptions};
+use crate::cli::{
+    BaseOptions, ClientManageCommand, ClientManagePeerCommand, ClientManageRouteCommand,
+    ClientStartCommand, ConnectionOptions,
+};
 use crate::client::event_loop::event_loop;
 use base64::decode;
 use client_state::ClientState;
@@ -20,10 +23,7 @@ use tonic::codegen::InterceptedService;
 use tonic::metadata::Ascii;
 use tonic::service::Interceptor;
 use tonic::transport::Channel;
-use tonic::{
-    metadata::MetadataValue,
-    transport::Endpoint
-};
+use tonic::{metadata::MetadataValue, transport::Endpoint};
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::prelude::*;
@@ -48,7 +48,10 @@ pub enum ConnectionError {
 }
 
 impl Interceptor for WirespiderInterceptor {
-    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+    fn call(
+        &mut self,
+        mut request: tonic::Request<()>,
+    ) -> Result<tonic::Request<()>, tonic::Status> {
         request
             .metadata_mut()
             .insert("authorization", self.token.clone());
@@ -155,7 +158,9 @@ pub async fn client_manage(manage_opts: ClientManageCommand) -> anyhow::Result<(
 
                 let request = ChangePeerRequest {
                     id: Some(id),
-                    what: Some(change_peer_request::What::Endpoint(change.new_endpoint.into())),
+                    what: Some(change_peer_request::What::Endpoint(
+                        change.new_endpoint.into(),
+                    )),
                 };
                 let mut client = connect(change.connection).await?;
                 let result = client.change_peer(request).await?;

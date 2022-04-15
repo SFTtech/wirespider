@@ -40,7 +40,10 @@ enum NatFiltering {
 }
 
 #[instrument]
-pub async fn get_nat_type(stun_host: &str, port: NonZeroU16) -> Result<(Option<SocketAddr>, NatType), ()> {
+pub async fn get_nat_type(
+    stun_host: &str,
+    port: NonZeroU16,
+) -> Result<(Option<SocketAddr>, NatType), ()> {
     debug!("getting nat type");
     let stun_host = lookup_host(stun_host)
         .await
@@ -51,10 +54,11 @@ pub async fn get_nat_type(stun_host: &str, port: NonZeroU16) -> Result<(Option<S
     let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::new(0, 0, 0, 0), port.into())))
         .await
         .or(Err(()))?;
-    
+
     debug!("getting nat mapping");
     let (addr, mapping) = get_nat_mapping_behaviour(socket, stun_host)
-        .await.expect_or_log("Could not connect to STUN server, check internet connection.");
+        .await
+        .expect_or_log("Could not connect to STUN server, check internet connection.");
 
     // return early
     if mapping == NatMapping::NoNat {
@@ -266,6 +270,11 @@ async fn get_nat_filtering_behaviour(
 
 #[tokio::test]
 async fn test_nat_behaviour() {
-    let result = get_nat_type("stun.stunprotocol.org:3478", NonZeroU16::new(51820).unwrap()).await.unwrap();
+    let result = get_nat_type(
+        "stun.stunprotocol.org:3478",
+        NonZeroU16::new(51820).unwrap(),
+    )
+    .await
+    .unwrap();
     println!("Got address: {:?}, Nat type: {:?}", result.0, result.1);
 }
