@@ -10,6 +10,20 @@ on:
       - main
 
 jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: "rustfmt"
+          override: true
+      - name: Formating check
+        run: cargo fmt --check
+
   tests:
     name: Rust ${{ matrix.rust }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -39,6 +53,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
           profile: minimal
+          components: "clippy, rustfmt"
           override: true
       - name: Cache registry, build data
         uses: actions/cache@v2
@@ -51,6 +66,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo
+      - name: Lint
+        run: cargo clippy
       - name: Test
         run: cargo test
       - name: Build
