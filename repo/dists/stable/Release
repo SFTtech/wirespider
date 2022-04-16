@@ -1,0 +1,26 @@
+Codename: stable
+Date: Sat, 16 Apr 2022 12:00:23 UTC
+Architectures: amd64 i386
+Components: main
+Description: SFTtech/wirespider
+MD5Sum:
+ 5778912f4c1301d8bb5f18f467a3ccfa 2918 main/binary-amd64/Packages
+ da942734bb630bb73d2de67a00a1f8d0 1254 main/binary-amd64/Packages.gz
+ ae1b579dbb68271a8f0f284b0ab4a15e 68 main/binary-amd64/Release
+ d41d8cd98f00b204e9800998ecf8427e 0 main/binary-i386/Packages
+ 7029066c27ac6f5ef18d660d5741979a 20 main/binary-i386/Packages.gz
+ 050b531f5bbcbb5508720b21b154e070 67 main/binary-i386/Release
+SHA1:
+ 6322f0f9061da7c370b8eb20e192fb1fd5d05eaf 2918 main/binary-amd64/Packages
+ 1fe52ffeff7682ded068205d4af4b160c18b451b 1254 main/binary-amd64/Packages.gz
+ e61f4692a68e02ffdcd0634bad2066695ccc7a78 68 main/binary-amd64/Release
+ da39a3ee5e6b4b0d3255bfef95601890afd80709 0 main/binary-i386/Packages
+ 46c6643f07aa7f6bfe7118de926b86defc5087c4 20 main/binary-i386/Packages.gz
+ c78d8123a4f66ebfef7eda18536ce2e5c5895527 67 main/binary-i386/Release
+SHA256:
+ c79e4754e7f6e330d6a08ad615377040f3ffcc2894b27b9d03e9709ced5eb549 2918 main/binary-amd64/Packages
+ 8aa318a8a986f24965b53fc550fdc0c315d9917cd74f777f1b29588fb38f56f4 1254 main/binary-amd64/Packages.gz
+ 465418ccb98a2b6d5ca5f4282f6791c4477501f093630ebc632fcffb45b81d67 68 main/binary-amd64/Release
+ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 0 main/binary-i386/Packages
+ 59869db34853933b239f1e2219cf7d431da006aa919635478511fabbfc8849d2 20 main/binary-i386/Packages.gz
+ 9d60158af7d50b620e26ce737c13bd56c604d0d01b92e90d5d1b62a9ad723199 67 main/binary-i386/Release
