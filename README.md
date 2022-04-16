@@ -14,7 +14,7 @@ Wirespider consists of a server and a client. The server is responsible of pushi
 
 An APT repository for wirespider is avaiable, to add it run the following commands:
 ```
-sudo curl https://sfttech.github.io/wirespider/public.key -o /etc/apt/trusted.gpg.d/wirespider.key
+curl https://sfttech.github.io/wirespider/public.key -o - | sudo apt-key add
 echo "deb https://sfttech.github.io/wirespider/repo/ stable main" | sudo tee /etc/apt/sources.list.d/wirespider.list
 ```
 
