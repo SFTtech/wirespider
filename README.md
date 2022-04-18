@@ -14,8 +14,8 @@ Wirespider consists of a server and a client. The server is responsible of pushi
 
 An APT repository for wirespider is avaiable, to add it run the following commands:
 ```
-curl https://sfttech.github.io/wirespider/public.key -o - | sudo apt-key add
-echo "deb https://sfttech.github.io/wirespider/repo/ stable main" | sudo tee /etc/apt/sources.list.d/wirespider.list
+wget -O- https://sfttech.github.io/wirespider/public.key | gpg --dearmor | sudo dd of=/usr/share/keyrings/wirespider-archive-keyring.gpg
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/wirespider-archive-keyring.gpg] https://sfttech.github.io/wirespider/repo/ stable main" | sudo tee /etc/apt/sources.list.d/wirespider.list
 ```
 
 There is an official wirespider AUR package as well (wirespider), and an ebuild for gentoo in the sft overlay.
