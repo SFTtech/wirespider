@@ -67,9 +67,6 @@ uuid = "0.8.2"
 ipnet = "2.4.0"
 tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
 
-[profile.release]
-strip = "symbols"
-
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
