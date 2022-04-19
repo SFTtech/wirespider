@@ -1,10 +1,12 @@
+use std::net::IpAddr;
 use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
 use base64::{decode, encode};
 use eui48::MacAddress;
 use ipnet::IpNet;
-use local_ip_address::list_afinet_netifas;
+use network_interface::NetworkInterface;
+use network_interface::NetworkInterfaceConfig;
 use rand::{rngs::OsRng, Rng};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, error};
@@ -103,10 +105,15 @@ pub async fn event_loop(
         .await
         .unwrap_or_log()
         .expect("Could not determine NAT, are you connected to the internet?");
-    let local_ips = list_afinet_netifas()
+
+    let local_ips = NetworkInterface::show()
         .unwrap_or_log()
         .into_iter()
-        .map(|(_, ip)| ip.into())
+        .filter(|x| x.addr.is_some())
+        .map(|x| match x.addr.unwrap() {
+            network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
+            network_interface::Addr::V6(x) => IpAddr::from(x.ip).into()
+        })
         .collect();
     debug!("local ips: {local_ips:?}");
     let address_reply = client
