@@ -9,19 +9,19 @@ set -x
 
 function start_server() {
     NETNS="${1}"
-    ip netns exec "${NETNS}" wirespider server-start --debug --bind "${2}" &
+    ip netns exec "${NETNS}" wirespider start-server --debug --bind "${2}" &
 }
 
 function setup_server() {
-    wirespider manage-server migrate
-    wirespider manage-server network create 10.1.2.0/24
-    wirespider manage-server network create 10.1.3.0/24 vxlan
-    wirespider manage-server create-admin admin 10.1.2.1/24 | sed -e 's/Created admin with token: //' > ./admin-token
+    wirespider database migrate
+    wirespider database create-network 10.1.2.0/24
+    wirespider database create-network 10.1.3.0/24 vxlan
+    wirespider database create-admin admin 10.1.2.1/24 | sed -e 's/Created admin with token: //' > ./admin-token
     truncate -s 36 ./admin-token
 }
 
 function create_user() {
-    ip netns exec test1 wirespider send-command peer add --token "$(<./admin-token)" --endpoint "http://172.17.0.1:49582" "$@" | sed -e 's/Peer created. Token: //' > "./token-${1}"
+    ip netns exec test1 wirespider send-command add-peer --token "$(<./admin-token)" --endpoint "http://172.17.0.1:49582" "$@" | sed -e 's/Peer created. Token: //' > "./token-${1}"
     truncate -s 36 "./token-${1}"
 }
 
@@ -30,15 +30,15 @@ function run_client() {
     export WS_DEVICE="$2"
     export WS_TOKEN=$(< "./token-${3}")
     export WS_PRIVATE_KEY="./privkey-${WS_DEVICE}"
-    ip netns exec "${NETNS}" wirespider client-start -d --fixed-endpoint "1.2.3.4:$WS_LISTEN_PORT" &
+    ip netns exec "${NETNS}" wirespider start-client -d --fixed-endpoint "1.2.3.4:$WS_LISTEN_PORT" &
     export WS_LISTEN_PORT=$(expr $WS_LISTEN_PORT + 1)
 }
 
 function cleanup() {
     kill $(jobs -p)
-    #rm ./data.db*
-    #rm ./privkey-*
-    #rm ./admin-token
+    rm ./data.db*
+    rm ./privkey-*
+    rm ./admin-token
 }
 
 function setup_netns() {

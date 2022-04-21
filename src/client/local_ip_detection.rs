@@ -1,44 +1,28 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    time::Duration,
-};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use futures::future::join_all;
 use tokio::io::Error;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
-use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::instrument;
 use tracing_unwrap::ResultExt;
-use wirespider::WireguardKey;
 
-const MESSAGE: &str = "wirespider";
-
-pub async fn local_ip_detection_service(
-    subsys: SubsystemHandle,
-    key: WireguardKey,
-) -> Result<(), Error> {
-    let socket = UdpSocket::bind("0.0.0.0:27212").await.unwrap_or_log();
-    let mut buf = [0u8; MESSAGE.len()];
-    loop {
-        tokio::select! {
-            recv = socket.recv_from(&mut buf) => {
-                let (length, from) = recv.unwrap_or_log();
-                if length != MESSAGE.len() {
-                    continue;
-                }
-                socket.send_to(&key, from).await.unwrap_or_log();
-            }
-            _ = subsys.on_shutdown_requested() => {
-                return Ok(());
-            }
-        };
-    }
-}
+use boringtun::crypto::X25519PublicKey;
+use boringtun::crypto::X25519SecretKey;
+use boringtun::noise::Tunn;
 
 #[instrument]
-pub async fn check_local_ips(ips: &[IpAddr], key: WireguardKey) -> Result<Option<IpAddr>, Error> {
-    let results = join_all(ips.iter().map(|x| check_ip(*x, key))).await;
+pub async fn check_local_ips(
+    destinations: &[SocketAddr],
+    priv_key: Arc<X25519SecretKey>,
+    pub_key: Arc<X25519PublicKey>,
+) -> Result<Option<SocketAddr>, Error> {
+    let results = join_all(
+        destinations
+            .iter()
+            .map(|x| check_ip(*x, priv_key.clone(), pub_key.clone())),
+    )
+    .await;
     for result in results {
         match result? {
             Some(ip) => return Ok(Some(ip)),
@@ -49,17 +33,51 @@ pub async fn check_local_ips(ips: &[IpAddr], key: WireguardKey) -> Result<Option
 }
 
 #[instrument]
-async fn check_ip(ip: IpAddr, key: WireguardKey) -> Result<Option<IpAddr>, Error> {
-    if ip.is_ipv6() {
+async fn check_ip(
+    dest: SocketAddr,
+    priv_key: Arc<X25519SecretKey>,
+    pub_key: Arc<X25519PublicKey>,
+) -> Result<Option<SocketAddr>, Error> {
+    if dest.is_ipv6() {
         return Ok(None); // not supported for now
     }
+    if dest.ip().is_loopback() {
+        return Ok(None);
+    }
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    socket.connect(SocketAddr::from((ip, 27212))).await?;
-    socket.send(MESSAGE.as_bytes()).await?;
-    let mut buffer: WireguardKey = [0; 32];
+    socket.connect(dest).await?;
+    let mut buffer = [0u8; 148]; // size from boringtun::noise::HANDSHAKE_INIT_SZ
+    let mut tun = Tunn::new(priv_key, pub_key, None, None, 1, None).unwrap_or_log();
+    match tun.format_handshake_initiation(&mut buffer, false) {
+        boringtun::noise::TunnResult::Err(_) => return Ok(None),
+        boringtun::noise::TunnResult::WriteToNetwork(buf) => {
+            let size = socket.send(buf).await?;
+            if size != buf.len() {
+                return Ok(None);
+            };
+        }
+        _ => unreachable!(),
+    };
 
     match timeout(Duration::from_millis(100), socket.recv(&mut buffer)).await {
-        Ok(Ok(size)) if size == 32 && buffer == key => Ok(Some(ip)),
+        Ok(Ok(size)) => {
+            let mut out_buf = [0u8; 92]; // size from boringtun::noise::HANDSHAKE_RESP_SZ
+            let mut read_size = size;
+            loop {
+                match tun
+                    .as_mut()
+                    .decapsulate(Some(dest.ip()), &buffer[0..read_size], &mut out_buf)
+                {
+                    boringtun::noise::TunnResult::Done => return Ok(Some(dest)),
+                    boringtun::noise::TunnResult::WriteToNetwork(_) => {
+                        // we do not want to actually send an response. "Receive" empty datagrams until we reach Err or Done
+                        read_size = 0;
+                        continue;
+                    }
+                    _ => return Ok(None),
+                }
+            }
+        }
         _ => Ok(None),
     }
 }

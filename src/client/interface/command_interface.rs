@@ -1,16 +1,17 @@
 use super::interface_trait::{OverlayManagementInterface, WireguardManagementInterface};
 
 use base64::encode;
+use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
 use eui48::MacAddress;
 use ipnet::IpNet;
 use std::{
     net::{IpAddr, SocketAddr},
     num::NonZeroU16,
     process::Command,
+    sync::Arc,
 };
 use tempfile::NamedTempFile;
 use tracing::debug;
-use wirespider::WireguardKey;
 
 #[derive(Clone, Debug)]
 pub struct WireguardCommandLineInterface {
@@ -23,7 +24,7 @@ impl WireguardManagementInterface for WireguardCommandLineInterface {
 
     fn create_wireguard_device(
         device_name: String,
-        privkey: WireguardKey,
+        privkey: Arc<X25519SecretKey>,
         port: Option<NonZeroU16>,
         addresses: &[IpNet],
     ) -> Result<Self, Self::Error> {
@@ -51,7 +52,7 @@ impl WireguardManagementInterface for WireguardCommandLineInterface {
             args.push(&str_port);
         }
         let file = NamedTempFile::new().or(Err(()))?;
-        std::fs::write(file.path(), encode(privkey)).or(Err(()))?;
+        std::fs::write(file.path(), encode(privkey.as_bytes())).or(Err(()))?;
         args.push("private-key");
         args.push(file.path().to_str().ok_or(())?);
 
@@ -85,13 +86,13 @@ impl WireguardManagementInterface for WireguardCommandLineInterface {
 
     fn set_peer(
         &self,
-        pubkey: WireguardKey,
+        pubkey: Arc<X25519PublicKey>,
         endpoint: Option<SocketAddr>,
         persistent_keepalive: Option<NonZeroU16>,
         allowed_ips: &[IpNet],
     ) -> Result<(), Self::Error> {
         let mut args = vec!["set", &self.device_name, "peer"];
-        let str_pubkey = encode(pubkey);
+        let str_pubkey = encode(pubkey.as_bytes());
         args.push(&str_pubkey);
 
         let str_endpoint;
@@ -128,9 +129,9 @@ impl WireguardManagementInterface for WireguardCommandLineInterface {
         Ok(())
     }
 
-    fn remove_peer(&self, pubkey: wirespider::WireguardKey) -> Result<(), Self::Error> {
+    fn remove_peer(&self, pubkey: Arc<X25519PublicKey>) -> Result<(), Self::Error> {
         let mut args = vec!["set", &self.device_name, "peer"];
-        let str_pubkey = encode(pubkey);
+        let str_pubkey = encode(pubkey.as_bytes());
         args.push(&str_pubkey);
         args.push("remove");
         let output = Command::new("wg")

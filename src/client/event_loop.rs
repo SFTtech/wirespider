@@ -1,8 +1,11 @@
 use std::net::IpAddr;
+use std::str::FromStr;
+use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
-use base64::{decode, encode};
+use base64::encode;
+use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
 use eui48::MacAddress;
 use ipnet::IpNet;
 use network_interface::NetworkInterface;
@@ -11,16 +14,12 @@ use rand::{rngs::OsRng, Rng};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{debug, error};
 use tracing_unwrap::ResultExt;
-use wirespider::{
-    protocol::{event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags},
-    WireguardKey,
+use wirespider::protocol::{
+    event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags,
 };
-use x25519_dalek_ng::{PublicKey, StaticSecret};
 
 use crate::client::{
-    connect,
-    interface::OverlayManagementInterface,
-    local_ip_detection::{check_local_ips, local_ip_detection_service},
+    connect, interface::OverlayManagementInterface, local_ip_detection::check_local_ips,
     DefaultOverlayInterface,
 };
 use crate::client::{
@@ -82,24 +81,15 @@ pub async fn event_loop(
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
             .await
             .expect("Could not read private key");
-        let private_key = decode(private_key_encoded).expect("Could not decode private key");
-        if private_key.len() != 32 {
-            panic!("Private key has wrong length");
-        }
-        let mut key_bytes = [0u8; 32];
-        key_bytes.copy_from_slice(&private_key[0..32]);
-        StaticSecret::from(key_bytes)
+        Arc::new(
+            X25519SecretKey::from_str(&private_key_encoded).expect("Could not decode private key"),
+        )
     } else {
-        let private_key = StaticSecret::new(&mut rng);
-        let encoded = encode(private_key.to_bytes());
-        tokio::fs::write(&start_opts.private_key, &encoded).await?;
+        let private_key = Arc::new(X25519SecretKey::new());
+        tokio::fs::write(&start_opts.private_key, encode(private_key.as_bytes())).await?;
         private_key
     };
-    let pubkey = PublicKey::from(&private_key).to_bytes();
-    debug!("Starting local ip detection endpoint subsystem");
-    subsys.start("LocalIpEndpoint", move |x| {
-        local_ip_detection_service(x, pubkey)
-    });
+    let pubkey = Arc::new(private_key.public_key());
 
     let (external_address, nat_type) = nat_detection
         .await
@@ -112,13 +102,13 @@ pub async fn event_loop(
         .filter(|x| x.addr.is_some())
         .map(|x| match x.addr.unwrap() {
             network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
-            network_interface::Addr::V6(x) => IpAddr::from(x.ip).into()
+            network_interface::Addr::V6(x) => IpAddr::from(x.ip).into(),
         })
         .collect();
     debug!("local ips: {local_ips:?}");
     let address_reply = client
         .get_addresses(AddressRequest {
-            wg_public_key: PublicKey::from(&private_key).to_bytes().to_vec(),
+            wg_public_key: Vec::from(private_key.public_key().as_bytes()),
             nat_type: nat_type.into(),
             node_flags: Some(NodeFlags {
                 monitor: start_opts.monitor,
@@ -140,7 +130,7 @@ pub async fn event_loop(
 
     let interface = DefaultWireguardInterface::create_wireguard_device(
         device_name.clone(),
-        private_key.to_bytes(),
+        private_key.clone(),
         Some(port),
         &address_list,
     )
@@ -160,9 +150,10 @@ pub async fn event_loop(
         .map(|x| x.try_into().unwrap())
         .collect();
 
+    // TODO: only create overlay interface when overlay ips are present
     let mut mac_bytes = Vec::with_capacity(6);
     mac_bytes.push(0xaa);
-    mac_bytes.extend_from_slice(&PublicKey::from(&private_key).to_bytes()[0..5]);
+    mac_bytes.extend_from_slice(&private_key.public_key().as_bytes()[0..5]);
     let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
     let overlay_interface = DefaultOverlayInterface::create_overlay_device(
         format!("{}-vxlan", device_name),
@@ -208,20 +199,12 @@ pub async fn event_loop(
                                 let endpoint = peer.endpoint.map(|x| match x {
                                     peer::Endpoint::Addr(x) => x.try_into().unwrap(),
                                 });
-                                let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap();
+                                let peer_pubkey = Arc::new(X25519PublicKey::from(peer.wg_public_key.as_slice()));
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
-                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
-
-                                debug!("getting local ips");
-                                let local_ips = peer.local_ips.iter().map(|x| x.try_into()).collect::<Result<Vec<_>,_>>().unwrap_or_log();
-                                let local_ip = check_local_ips(&local_ips, pubkey).await.unwrap_or_log();
-                                let endpoint = match local_ip {
-                                    Some(ip) => Some(SocketAddr::from((ip,peer.local_port.try_into().unwrap_or_log()))),
-                                    None => endpoint,
-                                };
-                                debug!("Got endpoint: {:?}", endpoint);
+                                let peer_port : u16 = peer.local_port.try_into().expect("Invalid port");
 
                                 let allowed_ips: Vec<IpNet> = peer
                                     .allowed_ips
@@ -242,7 +225,7 @@ pub async fn event_loop(
                                         _ => Some(start_opts.keep_alive),
                                     }
                                 };
-                                let create = if start_opts.monitor || start_opts.relay {
+                                let mut create = if start_opts.monitor || start_opts.relay {
                                     true
                                 } else {
                                     match (nat_type, peer_nat_type) {
@@ -254,10 +237,21 @@ pub async fn event_loop(
                                         (_, _) => true,
                                     }
                                 };
-                                if create {
-                                    interface
-                                        .set_peer(pubkey, endpoint, keep_alive, &allowed_ips)
-                                        .unwrap();
+                                // create the peer anyways and try to check for local ips
+                                interface
+                                    .set_peer(peer_pubkey.clone(), endpoint, keep_alive, &allowed_ips)
+                                    .unwrap_or_log();
+                                debug!("getting local ips");
+                                let local_sock_addrs = peer.local_ips.iter().map(|x| x.try_into().map(|x : IpAddr| SocketAddr::from((x, peer_port)))).collect::<Result<Vec<_>,_>>().unwrap_or_log();
+                                let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey.clone()).await.unwrap_or_log();
+                                debug!("Got local endpoint: {:?}", local_endpoint);
+                                if local_endpoint.is_some() && local_endpoint != endpoint {
+                                    interface.set_peer(peer_pubkey.clone(), local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
+                                    create = true;
+                                }
+                                if !create {
+                                    // we could not find a local ip and the nat setup would prevent direct connection so we remove all allowed ips
+                                    interface.set_peer(peer_pubkey.clone(), None, keep_alive, &[]).unwrap_or_log();
                                 }
                                 let destination_ip = peer
                                     .tunnel_ips
@@ -274,13 +268,13 @@ pub async fn event_loop(
                                 }
                             }
                             EventType::Deleted => {
-                                let pubkey: WireguardKey = peer.wg_public_key.try_into().unwrap_or_log();
+                                let peer_pubkey = Arc::new(X25519PublicKey::from(peer.wg_public_key.as_slice()));
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
-                                mac_bytes.extend_from_slice(&pubkey[0..5]);
+                                mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
                                 overlay_interface.remove_peer(mac_addr).unwrap_or_log();
-                                interface.remove_peer(pubkey).unwrap();
+                                interface.remove_peer(peer_pubkey).unwrap();
                             }
                         },
                         Some(event::Target::Route(route)) => match event_type {
