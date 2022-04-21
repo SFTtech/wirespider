@@ -31,7 +31,7 @@ pub enum ServerDatabaseCommand {
     Network(NetworkCommand),
 
     #[clap(name = "migrate", about = "Run database migrations")]
-    Migrate,
+    Migrate(DatabaseOptions),
 }
 
 #[derive(Debug, Subcommand)]
@@ -39,12 +39,14 @@ pub enum NetworkCommand {
     #[clap(name = "create-network", about = "Create network")]
     Create(CreateNetworkCommand),
     #[clap(name = "delete-network", about = "Delete network")]
-    Delete(ParamIPNet),
+    Delete(DeleteNetworkCommand),
 }
 
 #[derive(Debug, Args)]
 #[clap(about = "create a new network")]
 pub struct CreateNetworkCommand {
+    #[clap(flatten)]
+    pub db: DatabaseOptions,
     #[clap(help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
     pub network: IpNet,
     #[clap(arg_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
@@ -55,6 +57,14 @@ pub struct CreateNetworkCommand {
 pub enum NetworkType {
     Wireguard,
     Vxlan,
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteNetworkCommand {
+    #[clap(flatten)]
+    pub db: DatabaseOptions,
+    #[clap(flatten)]
+    pub ipnet: ParamIPNet,
 }
 
 #[derive(Debug, Args)]
@@ -70,6 +80,8 @@ pub struct ParamIPNet {
 #[derive(Debug, Args)]
 #[clap(about = "create a new admin account")]
 pub struct CreateAdminCommand {
+    #[clap(flatten)]
+    pub db: DatabaseOptions,
     #[clap(required = true, help = "Name of the admin")]
     pub name: String,
     #[clap(required = true, min_values = 1, help = "IPs to assign to this admin")]
@@ -81,7 +93,12 @@ pub struct ServerBaseOptions {
     // enable debug
     #[clap(long, help = "Enable debug output")]
     pub debug: bool,
+    #[clap(flatten)]
+    pub db: DatabaseOptions,
+}
 
+#[derive(Debug, Args)]
+pub struct DatabaseOptions {
     #[clap(short('d'), long, env, value_hint = ValueHint::Url, help = "URL to database. Needs to start with \"sqlite:\"")]
     pub database_url: String,
 }

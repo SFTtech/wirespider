@@ -46,7 +46,7 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(subscriber)?;
 
-    env::set_var("DATABASE_URL", &opt.base.database_url);
+    env::set_var("DATABASE_URL", &opt.base.db.database_url);
     debug!("Starting");
 
     Toplevel::new()
@@ -81,11 +81,17 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
         SqliteConnectOptions::from_str(&env::var("DATABASE_URL").unwrap())?.create_if_missing(true);
     let pool = SqlitePool::connect_with(options).await?;
     match opt {
-        ServerDatabaseCommand::Migrate => {
+        ServerDatabaseCommand::Migrate(db) => {
+            env::set_var("DATABASE_URL", &db.database_url);
             MIGRATOR.run(&pool).await?;
             Ok(())
         }
-        ServerDatabaseCommand::CreateAdmin(CreateAdminCommand { name, addresses }) => {
+        ServerDatabaseCommand::CreateAdmin(CreateAdminCommand {
+            name,
+            addresses,
+            db,
+        }) => {
+            env::set_var("DATABASE_URL", &db.database_url);
             // find networks for addresses
             let mut networkid_map: HashMap<IpNet, i64> = HashMap::new();
             let mut addr_network_map: HashMap<IpNet, IpNet> = HashMap::new();
@@ -133,6 +139,7 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
             Ok(())
         }
         ServerDatabaseCommand::Network(NetworkCommand::Create(x)) => {
+            env::set_var("DATABASE_URL", &x.db.database_url);
             let network_type = match x.network_type {
                 NetworkType::Vxlan => "vxlan",
                 NetworkType::Wireguard => "wireguard",
@@ -156,12 +163,13 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
             Ok(())
         }
         ServerDatabaseCommand::Network(NetworkCommand::Delete(x)) => {
+            env::set_var("DATABASE_URL", &x.db.database_url);
             let query = sqlx::query(
                 r#"
                             DELETE FROM networks WHERE network=? AND ipv6=?
                         "#,
             );
-            match x.ipnet {
+            match x.ipnet.ipnet {
                 IpNet::V4(x) => {
                     query.bind(x.to_string()).bind(false).execute(&pool).await?;
                 }
