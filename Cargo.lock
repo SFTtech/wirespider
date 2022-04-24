@@ -2616,7 +2616,6 @@ dependencies = [
  "rand",
  "sqlx",
  "stun_codec",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-graceful-shutdown",

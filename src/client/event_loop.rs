@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
@@ -11,8 +11,10 @@ use ipnet::IpNet;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
 use rand::{rngs::OsRng, Rng};
+use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::{
     event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags,
@@ -42,6 +44,8 @@ pub enum EventLoopError {
     Status(#[from] tonic::Status),
     #[error(transparent)]
     IO(#[from] std::io::Error),
+    #[error("Shutting down")]
+    Shutdown,
 }
 
 pub async fn event_loop(
@@ -128,21 +132,22 @@ pub async fn event_loop(
         .map(|x| x.try_into().unwrap())
         .collect();
 
-    let interface = DefaultWireguardInterface::create_wireguard_device(
-        device_name.clone(),
-        private_key.clone(),
-        Some(port),
-        &address_list,
-    )
-    .expect("Could not set up wireguard device");
+    let interface = Arc::new(Mutex::new(
+        DefaultWireguardInterface::create_wireguard_device(
+            device_name.clone(),
+            private_key.clone(),
+            Some(port),
+            &address_list,
+        )
+        .expect("Could not set up wireguard device"),
+    ));
 
-    if start_opts.monitor {
-        let monitor = monitor::Monitor::new(device_name.clone());
-        let mut monitor_client = client.clone();
-        tokio::spawn(async move {
-            monitor.monitor(&CLIENT_STATE, &mut monitor_client).await;
-        });
-    }
+    let monitor_interface = interface.clone();
+    let monitor_client = client.clone();
+    let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
+    subsys.start("monitor", move |subsys| {
+        monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
+    });
 
     let overlay_address_list = address_reply
         .overlay_ips
@@ -168,17 +173,21 @@ pub async fn event_loop(
         let backoff = backoff::ExponentialBackoffBuilder::new()
             .with_max_interval(Duration::from_secs(60))
             .build();
-        let mut events_stream = retry(backoff, || async {
-            client
-                .clone()
-                .get_events(EventsRequest {
-                    start_event: event_counter,
-                })
-                .await
-                .map_err(|x| x.into())
-        })
-        .await?
-        .into_inner();
+        let events_stream = retry(backoff, || async {
+                let mut client = client.clone();
+                tokio::select! {
+                    _ = subsys.on_shutdown_requested() => Err(backoff::Error::Permanent(EventLoopError::Shutdown)),
+                    event = client.get_events(EventsRequest {
+                            start_event: event_counter,
+                        }) => event.map_err(|x| backoff::Error::transient(x.into()))
+                }
+            })
+        .await;
+        let mut events_stream = match events_stream {
+            Ok(x) => x.into_inner(),
+            Err(EventLoopError::Shutdown) => return Ok(()),
+            Err(e) => return Err(e),
+        };
         loop {
             tokio::select! {
                 event = events_stream.try_next() => {
@@ -237,8 +246,18 @@ pub async fn event_loop(
                                         (_, _) => true,
                                     }
                                 };
+                                // get a primary ip
+                                let destination_ip : IpAddr = peer
+                                    .tunnel_ips
+                                    .into_iter()
+                                    .next()
+                                    .map(|x| x.try_into())
+                                    .unwrap()
+                                    .unwrap();
                                 // create the peer anyways and try to check for local ips
                                 interface
+                                    .lock()
+                                    .await
                                     .set_peer(peer_pubkey.clone(), endpoint, keep_alive, &allowed_ips)
                                     .unwrap_or_log();
                                 debug!("getting local ips");
@@ -246,20 +265,25 @@ pub async fn event_loop(
                                 let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey.clone()).await.unwrap_or_log();
                                 debug!("Got local endpoint: {:?}", local_endpoint);
                                 if local_endpoint.is_some() && local_endpoint != endpoint {
-                                    interface.set_peer(peer_pubkey.clone(), local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey.clone(), local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
                                     create = true;
+                                    // send a single packet to this peer to redo the handshake
+                                    if let Ok(socket) = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await {
+                                        debug!("Sending packet to initiate handshake to {:?}", destination_ip);
+                                        if let Err(e) = socket.send_to("wirespider".as_bytes(), SocketAddr::from((destination_ip, 1337))).await {
+                                            warn!("Error sending packet: {:?}", e);
+                                        }
+                                    } else {
+                                        warn!("Could not bind to udp socket");
+                                    }
                                 }
                                 if !create {
-                                    // we could not find a local ip and the nat setup would prevent direct connection so we remove all allowed ips
-                                    interface.set_peer(peer_pubkey.clone(), None, keep_alive, &[]).unwrap_or_log();
+                                    // we could not find a local ip and the nat setup would prevent direct connection so we remove all allowed ips.
+                                    // This allows discovery of this peer when the other peer later joins the same lan.
+                                    // The monitor component will check for handshakes and if successfull handshakes are discovered
+                                    // it will set the actual allowed ips.
+                                    interface.lock().await.set_peer(peer_pubkey.clone(), None, keep_alive, &[]).unwrap_or_log();
                                 }
-                                let destination_ip = peer
-                                    .tunnel_ips
-                                    .into_iter()
-                                    .next()
-                                    .map(|x| x.try_into())
-                                    .unwrap()
-                                    .unwrap();
                                 let overlay_ip = peer.overlay_ips.into_iter().next();
                                 if let Some(dest_net) = overlay_ip {
                                     overlay_interface
@@ -274,12 +298,12 @@ pub async fn event_loop(
                                 mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
                                 overlay_interface.remove_peer(mac_addr).unwrap_or_log();
-                                interface.remove_peer(peer_pubkey).unwrap();
+                                interface.lock().await.remove_peer(peer_pubkey).unwrap();
                             }
                         },
                         Some(event::Target::Route(route)) => match event_type {
                             EventType::New => {
-                                interface
+                                interface.lock().await
                                     .add_route(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),
@@ -287,7 +311,7 @@ pub async fn event_loop(
                                     .unwrap();
                             }
                             EventType::Deleted => {
-                                interface
+                                interface.lock().await
                                     .remove_route(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),

@@ -32,9 +32,8 @@ base64 = "0.13"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.4"
 iprange = "0.6.7"
-eui48 = "1.1.0"
+eui48 = "1"
 uuid = { version = "0.8", features = ["v4"] }
-tempfile = "3.3"
 
 # tracing
 tracing = {version = "0.1", features = ["release_max_level_debug"] }
