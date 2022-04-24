@@ -1,2 +1,4 @@
 /target
 /completions
+/scripts/*
+!/scripts/*.sh
