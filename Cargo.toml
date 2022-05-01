@@ -52,7 +52,7 @@ trackable = "1.2.0"
 network-interface = "=0.1.3-beta"
 
 # shutdown
-tokio-graceful-shutdown = "0.5"
+tokio-graceful-shutdown = "0.6"
 
 # retry
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
