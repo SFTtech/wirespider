@@ -33,7 +33,7 @@ rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.4"
 iprange = "0.6.7"
 eui48 = "1"
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4"] }
 
 # tracing
 tracing = {version = "0.1", features = ["release_max_level_debug"] }
@@ -62,7 +62,7 @@ tonic-build = { version = "0.7" }
 prost-build = { version = "0.10" }
 clap = { version = "3.1.8", features = ["derive","env"] }
 clap_complete = "3.1.1"
-uuid = "0.8"
+uuid = "1.0"
 ipnet = "2.4.0"
 tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
 
