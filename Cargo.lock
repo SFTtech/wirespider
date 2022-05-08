@@ -1015,6 +1015,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "308cc39be01b73d0d18f82a0e7b2a3df85245f84af96fdddc5d202d27e47b86a"
 
 [[package]]
+name = "miette"
+version = "4.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a565d01cf2dcab463159347d98a18f509fda8e4824e2965c3b430dd045ac1f23"
+dependencies = [
+ "miette-derive",
+ "once_cell",
+ "thiserror",
+ "unicode-width",
+]
+
+[[package]]
+name = "miette-derive"
+version = "4.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3240cd84b71bf89e5994030c21221f399a882251ed4b89849d3b8610fe8fe8ab"
+dependencies = [
+ "proc-macro2 1.0.37",
+ "quote 1.0.18",
+ "syn 1.0.91",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1889,14 +1912,16 @@ dependencies = [
 
 [[package]]
 name = "tokio-graceful-shutdown"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b9614e6d7b687b4daf9b5191d45039258b19405fb1493051cee400f29ec0e57"
+checksum = "fbb8ab87e10f037b63bc7f3b6313897b582afc860a41eea326c0cda0395e80f4"
 dependencies = [
- "anyhow",
  "async-recursion",
+ "async-trait",
  "futures",
  "log",
+ "miette",
+ "thiserror",
  "tokio",
  "tokio-util",
 ]

@@ -511,7 +511,7 @@ impl Wirespider for WirespiderServerState {
         // TODO: do not allow updating key to be the same as an existing entry
         debug!("getting peer data");
         let peer_query = sqlx::query(
-            r#"SELECT pubkey, current_endpoint, local_ips, local_port FROM peers WHERE peerid=?"#,
+            r#"SELECT pubkey, current_endpoint, local_ips, local_port, nat_type FROM peers WHERE peerid=?"#,
         )
         .bind(auth_peer.peerid)
         .fetch_one(&self.sqlite_pool)
@@ -572,6 +572,22 @@ impl Wirespider for WirespiderServerState {
                 //update database
                 sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
                     .bind(endpoint)
+                    .bind(auth_peer.peerid)
+                    .execute(&self.sqlite_pool)
+                    .await
+                    .into_status()?;
+            }
+        }
+
+        let old_nat_type = NatType::from_i32(peer_query.get::<i32, &str>("nat_type"));
+        let new_nat_type = request.get_ref().nat_type;
+
+        if let Some(old_nat_type) = old_nat_type {
+            if new_nat_type != old_nat_type as i32 {
+                updated = true;
+                //update database
+                sqlx::query(r#"UPDATE peers SET nat_type=? WHERE peerid=?"#)
+                    .bind(new_nat_type)
                     .bind(auth_peer.peerid)
                     .execute(&self.sqlite_pool)
                     .await

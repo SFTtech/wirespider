@@ -69,7 +69,7 @@ pub async fn event_loop(
     let nat_backoff = backoff.clone();
     let nat_detection = tokio::spawn(async move {
         if let Some(endpoint) = start_opts.fixed_endpoint {
-            Ok((Some(endpoint), NatType::NoNat))
+            Ok((Some(endpoint), start_opts.nat_type.into()))
         } else {
             let backoff = nat_backoff.clone();
             let stun_host = start_opts.stun_host.clone();
@@ -282,6 +282,8 @@ pub async fn event_loop(
                                     // This allows discovery of this peer when the other peer later joins the same lan.
                                     // The monitor component will check for handshakes and if successfull handshakes are discovered
                                     // it will set the actual allowed ips.
+                                    debug!("removing allowed ips");
+                                    interface.lock().await.remove_peer(peer_pubkey.clone()).unwrap_or_log();
                                     interface.lock().await.set_peer(peer_pubkey.clone(), None, keep_alive, &[]).unwrap_or_log();
                                 }
                                 let overlay_ip = peer.overlay_ips.into_iter().next();

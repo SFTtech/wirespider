@@ -30,7 +30,7 @@ function run_client() {
     export WS_DEVICE="$2"
     export WS_TOKEN=$(< "./token-${3}")
     export WS_PRIVATE_KEY="./privkey-${WS_DEVICE}"
-    ip netns exec "${NETNS}" wirespider start-client -d --fixed-endpoint "1.2.3.4:$WS_LISTEN_PORT" &
+    ip netns exec "${NETNS}" wirespider start-client -d --fixed-endpoint "1.2.3.4:$WS_LISTEN_PORT" --nat-type symmetric &
     export WS_LISTEN_PORT=$(expr $WS_LISTEN_PORT + 1)
 }
 
@@ -64,18 +64,20 @@ function show_devices() {
     ip netns exec test2 wg show wg-test2
 }
 
-rm ./data.db*
-setup_server
+#rm ./data.db*
+#setup_server
 setup_netns
 start_server test1 172.17.0.1:49582
 sleep 1
-create_user test1 10.1.2.2/24 10.1.3.2/24
-create_user test2 10.1.2.3/24 10.1.3.3/24
+#create_user test1 10.1.2.2/24 10.1.3.2/24
+#create_user test2 10.1.2.3/24 10.1.3.3/24
 
 run_client test1 wg-test1 test1 172.17.0.1
+sleep 5
+show_devices
 run_client test2 wg-test2 test2 172.17.0.2
 
-sleep 1
+sleep 5
 show_devices
 
 

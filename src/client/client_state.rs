@@ -1,3 +1,4 @@
+use ipnet::IpNet;
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -45,5 +46,16 @@ impl ClientState {
             }
         }
         result
+    }
+
+    pub async fn get_allowed_ips(&self, key: WireguardKey) -> Option<Vec<IpNet>> {
+        let peer_data = self.peers.read().await;
+        peer_data.get(&key).map(|x| {
+            x.allowed_ips
+                .iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
     }
 }

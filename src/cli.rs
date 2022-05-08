@@ -22,6 +22,20 @@ pub struct ServerRunCommand {
     pub bind: SocketAddr,
 }
 
+#[derive(Debug, ArgEnum, Clone)]
+pub enum NatType {
+    #[clap(name = "no-nat")]
+    NoNat,
+    #[clap(name = "full-cone")]
+    FullCone,
+    #[clap(name = "restricted-cone")]
+    RestrictedCone,
+    #[clap(name = "port-restricted-cone")]
+    PortRestrictedCone,
+    #[clap(name = "symmetric")]
+    Symmetric,
+}
+
 #[derive(Debug, Subcommand)]
 pub enum ServerDatabaseCommand {
     #[clap(name = "create-admin")]
@@ -197,9 +211,17 @@ pub struct ClientStartCommand {
     #[clap(
         long,
         env = "WS_FIXED_ENDPOINT",
-        help = "Skip NAT detection, report this endpoint and send NAT type \"NoNAT\" to server"
+        help = "Skip NAT detection, report this endpoint and send NAT type \"NoNAT\" to server unless another NAT type is specified"
     )]
     pub fixed_endpoint: Option<SocketAddr>,
+    #[clap(
+        long,
+        arg_enum,
+        env = "WS_NAT_TYPE",
+        default_value = "no-nat",
+        help = "When using a fixed endpoint report this NAT type"
+    )]
+    pub nat_type: NatType,
 }
 
 #[derive(Debug, Subcommand)]
