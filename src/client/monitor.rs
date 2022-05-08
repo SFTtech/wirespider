@@ -1,11 +1,14 @@
 use std::collections::HashMap;
+use std::num::NonZeroU16;
 use std::sync::Arc;
+use boringtun::crypto::X25519PublicKey;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio_graceful_shutdown::SubsystemHandle;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use tracing::error;
+use tracing_unwrap::ResultExt;
 use wirespider::protocol::change_peer_request::What;
 use wirespider::protocol::peer_identifier::Identifier;
 use wirespider::protocol::wirespider_client::WirespiderClient;
@@ -56,6 +59,25 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                         interface.blocking_lock().get_device()
                     }).await
                     .unwrap().unwrap();
+
+                    // check if we got a connection to a peer and add the allowed IPs
+                    for peer in device.peers.iter() {
+                        if peer.endpoint.is_some() {
+                            let allowed_ips = state.get_allowed_ips(peer.public_key).await;
+                            if let Some(allowed_ips) = allowed_ips {
+                                if allowed_ips.len() != peer.allowed_ips.len() {
+                                    let persistent_keepalive_interval = NonZeroU16::new(peer.persistent_keepalive_interval);
+                                    let pub_key = peer.public_key;
+                                    let endpoint = peer.endpoint;
+                                    let interface = self.interface.clone();
+                                    task::spawn_blocking(move || {
+                                        interface.blocking_lock().set_peer(Arc::new(X25519PublicKey::from(pub_key.as_slice())), endpoint, persistent_keepalive_interval, &allowed_ips)
+                                    }).await
+                                    .unwrap().unwrap_or_log();
+                                }
+                            }
+                        }
+                    }
 
                     if self.peer_updates {
                         let mut peer_endpoint_map = HashMap::new();

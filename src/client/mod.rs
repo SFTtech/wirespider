@@ -93,7 +93,7 @@ pub async fn client_start(start_opts: ClientStartCommand) -> anyhow::Result<()> 
     Toplevel::new()
         .catch_signals()
         .start("Eventloop", |subsys| event_loop(subsys, start_opts))
-        .handle_shutdown_requests(Duration::from_millis(1000))
+        .handle_shutdown_requests::<anyhow::Error>(Duration::from_millis(1000))
         .await?;
     Ok(())
 }
