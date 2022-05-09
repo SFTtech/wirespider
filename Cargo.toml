@@ -14,7 +14,7 @@ lazy_static = "1.4.0"
 itertools = "0.10.3"
 
 #wireguard
-wireguard-uapi = "2.0.2"
+wireguard-uapi = "2.0.3"
 boringtun = "0.4.0"
 
 # grpc
