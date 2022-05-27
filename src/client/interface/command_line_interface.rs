@@ -84,6 +84,20 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         net: IpNet,
         remote: IpAddr,
     ) -> Result<(), Self::Error> {
+        // delete existing entry
+        let args = &[
+            "fdb",
+            "del",
+            &mac_addr.to_hex_string(),
+            "dev",
+            &self.device_name
+        ];
+        debug!("running: bridge {}", args.join(" "));
+        let output = Command::new("bridge")
+            .args(args)
+            .output()
+            .expect("failed to execute process");
+        debug!("{:?}", output);
         // unicast endpoint to fdb
         let args = &[
             "fdb",
@@ -91,6 +105,8 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             &mac_addr.to_hex_string(),
             "dev",
             &self.device_name,
+            "self",
+            "static",
             "dst",
             &remote.to_string(),
             "port",
@@ -109,6 +125,8 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "00:00:00:00:00:00",
             "dev",
             &self.device_name,
+            "self",
+            "static",
             "dst",
             &remote.to_string(),
             "port",
@@ -122,7 +140,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         debug!("{:?}", output);
         let args = &[
             "neigh",
-            "add",
+            "replace",
             &net.addr().to_string(),
             "lladdr",
             &mac_addr.to_hex_string(),

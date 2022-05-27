@@ -211,7 +211,7 @@ pub async fn event_loop(
                                 let peer_pubkey = Arc::new(X25519PublicKey::from(peer.wg_public_key.as_slice()));
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
-                                mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
+                                mac_bytes.extend_from_slice(&peer_pubkey.as_bytes()[0..5]);
                                 let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
                                 let peer_port : u16 = peer.local_port.try_into().expect("Invalid port");
 
