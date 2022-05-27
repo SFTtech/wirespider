@@ -222,6 +222,7 @@ impl WirespiderServerState {
         let local_ips = peer_data
             .get::<&str, &str>("local_ips")
             .split(',')
+            .filter(|x| !x.is_empty())
             .map(IpAddr::from_str)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| Status::internal("local IP error"))?;
