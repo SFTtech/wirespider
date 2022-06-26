@@ -66,7 +66,7 @@ pub async fn connect(
         .keep_alive_while_idle(true)
         .http2_keep_alive_interval(Duration::from_secs(25 * 60));
     let channel = endpoint.connect().await?;
-    let token = MetadataValue::from_str(format!("Bearer {}", conn.token).as_str()).unwrap_or_log();
+    let token = format!("Bearer {}", conn.token).as_str().parse().unwrap_or_log();
     Ok(WirespiderClient::with_interceptor(
         channel,
         WirespiderInterceptor { token },
@@ -93,7 +93,7 @@ pub async fn client_start(start_opts: ClientStartCommand) -> anyhow::Result<()> 
     Toplevel::new()
         .catch_signals()
         .start("Eventloop", |subsys| event_loop(subsys, start_opts))
-        .handle_shutdown_requests::<anyhow::Error>(Duration::from_millis(1000))
+        .handle_shutdown_requests(Duration::from_millis(1000))
         .await?;
     Ok(())
 }

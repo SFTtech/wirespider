@@ -54,7 +54,7 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
             tonic_service(handle, opt.bind)
         })
         .catch_signals()
-        .handle_shutdown_requests::<anyhow::Error>(Duration::from_millis(1000))
+        .handle_shutdown_requests(Duration::from_millis(1000))
         .await?;
 
     Ok(())
