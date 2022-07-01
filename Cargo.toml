@@ -8,7 +8,7 @@ readme = "README.md"
 description = "Wirespider distributes wireguard tunnel configurations and routes"
 
 [dependencies]
-clap = { version = "3.1.8", features = ["derive","env"] }
+clap = { version = "3.2.8", features = ["derive","env"] }
 clap_complete = "3.1.4"
 lazy_static = "1.4.0"
 itertools = "0.10.3"
@@ -60,7 +60,7 @@ backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
 [build-dependencies]
 tonic-build = { version = "0.7" }
 prost-build = { version = "0.10" }
-clap = { version = "3.1.8", features = ["derive","env"] }
+clap = { version = "3.2.8", features = ["derive","env"] }
 clap_complete = "3.1.4"
 uuid = "1"
 ipnet = "2.4.0"
