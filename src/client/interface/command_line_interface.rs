@@ -90,7 +90,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "del",
             &mac_addr.to_hex_string(),
             "dev",
-            &self.device_name
+            &self.device_name,
         ];
         debug!("running: bridge {}", args.join(" "));
         let output = Command::new("bridge")

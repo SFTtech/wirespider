@@ -66,7 +66,10 @@ pub async fn connect(
         .keep_alive_while_idle(true)
         .http2_keep_alive_interval(Duration::from_secs(25 * 60));
     let channel = endpoint.connect().await?;
-    let token = format!("Bearer {}", conn.token).as_str().parse().unwrap_or_log();
+    let token = format!("Bearer {}", conn.token)
+        .as_str()
+        .parse()
+        .unwrap_or_log();
     Ok(WirespiderClient::with_interceptor(
         channel,
         WirespiderInterceptor { token },
