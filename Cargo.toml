@@ -18,8 +18,8 @@ wireguard-uapi = "2.0.3"
 boringtun = "0.4.0"
 
 # grpc
-tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
-prost = "0.10.0"
+tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
+prost = "0.11.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
@@ -58,13 +58,13 @@ tokio-graceful-shutdown = "0.10"
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
 
 [build-dependencies]
-tonic-build = { version = "0.7" }
-prost-build = { version = "0.10" }
+tonic-build = { version = "0.8" }
+prost-build = { version = "0.11" }
 clap = { version = "3.2.16", features = ["derive","env"] }
 clap_complete = "3.1.4"
 uuid = "1"
 ipnet = "2.4.0"
-tonic = { version = "0.7", features = ["tls", "tls-webpki-roots"]}
+tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
 
 
 [package.metadata.deb]
