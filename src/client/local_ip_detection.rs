@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use futures::future::join_all;
 use tokio::io::Error;
@@ -7,15 +7,14 @@ use tokio::time::timeout;
 use tracing::instrument;
 use tracing_unwrap::ResultExt;
 
-use boringtun::crypto::X25519PublicKey;
-use boringtun::crypto::X25519SecretKey;
+use x25519_dalek::{StaticSecret, PublicKey};
 use boringtun::noise::Tunn;
 
-#[instrument]
+#[instrument(skip(priv_key, pub_key))]
 pub async fn check_local_ips(
     destinations: &[SocketAddr],
-    priv_key: Arc<X25519SecretKey>,
-    pub_key: Arc<X25519PublicKey>,
+    priv_key: StaticSecret,
+    pub_key: PublicKey,
 ) -> Result<Option<SocketAddr>, Error> {
     let results = join_all(
         destinations
@@ -32,11 +31,11 @@ pub async fn check_local_ips(
     Ok(None)
 }
 
-#[instrument]
+#[instrument(skip(priv_key,pub_key))]
 async fn check_ip(
     dest: SocketAddr,
-    priv_key: Arc<X25519SecretKey>,
-    pub_key: Arc<X25519PublicKey>,
+    priv_key: StaticSecret,
+    pub_key: PublicKey,
 ) -> Result<Option<SocketAddr>, Error> {
     if dest.is_ipv6() {
         return Ok(None); // not supported for now

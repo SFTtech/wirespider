@@ -1,12 +1,11 @@
-use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
+use x25519_dalek::{StaticSecret, PublicKey};
 use eui48::MacAddress;
 use ipnet::IpNet;
 use std::{
     error::Error,
     fmt::Debug,
     net::{IpAddr, SocketAddr},
-    num::NonZeroU16,
-    sync::Arc,
+    num::NonZeroU16
 };
 use wireguard_uapi::get::Device;
 
@@ -15,18 +14,18 @@ pub trait WireguardManagementInterface: Sized {
     fn delete_device_if_exists(device_name: &str);
     fn create_wireguard_device(
         device_name: String,
-        privkey: Arc<X25519SecretKey>,
+        privkey: StaticSecret,
         port: Option<NonZeroU16>,
         addresses: &[IpNet],
     ) -> Result<Self, Self::Error>;
     fn set_peer(
         &mut self,
-        pubkey: Arc<X25519PublicKey>,
+        pubkey: PublicKey,
         endpoint: Option<SocketAddr>,
         persistent_keepalive: Option<NonZeroU16>,
         allowed_ips: &[IpNet],
     ) -> Result<(), Self::Error>;
-    fn remove_peer(&mut self, pubkey: Arc<X25519PublicKey>) -> Result<(), Self::Error>;
+    fn remove_peer(&mut self, pubkey: PublicKey) -> Result<(), Self::Error>;
     fn add_route(&mut self, network: IpNet, via: IpAddr) -> Result<(), Self::Error>;
     fn remove_route(&mut self, network: IpNet, via: IpAddr) -> Result<(), Self::Error>;
     fn get_device(&mut self) -> Result<Device, Self::Error>;

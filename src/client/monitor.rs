@@ -1,4 +1,4 @@
-use boringtun::crypto::X25519PublicKey;
+use x25519_dalek::PublicKey;
 use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::sync::Arc;
@@ -71,7 +71,7 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                                     let endpoint = peer.endpoint;
                                     let interface = self.interface.clone();
                                     task::spawn_blocking(move || {
-                                        interface.blocking_lock().set_peer(Arc::new(X25519PublicKey::from(pub_key.as_slice())), endpoint, persistent_keepalive_interval, &allowed_ips)
+                                        interface.blocking_lock().set_peer(PublicKey::from(pub_key), endpoint, persistent_keepalive_interval, &allowed_ips)
                                     }).await
                                     .unwrap().unwrap_or_log();
                                 }

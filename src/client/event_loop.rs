@@ -1,11 +1,10 @@
 use std::net::{IpAddr, Ipv4Addr};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
-use base64::encode;
-use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
+use x25519_dalek::{StaticSecret, PublicKey};
+use base64::{decode, encode};
 use eui48::MacAddress;
 use ipnet::IpNet;
 use network_interface::NetworkInterface;
@@ -85,15 +84,14 @@ pub async fn event_loop(
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
             .await
             .expect("Could not read private key");
-        Arc::new(
-            X25519SecretKey::from_str(&private_key_encoded).expect("Could not decode private key"),
-        )
+        let secret_key_bytes : [u8;32] = decode(private_key_encoded).expect("Could not decode private key").try_into().unwrap();
+        StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = Arc::new(X25519SecretKey::new());
-        tokio::fs::write(&start_opts.private_key, encode(private_key.as_bytes())).await?;
+        let private_key = StaticSecret::new(OsRng::default());
+        tokio::fs::write(&start_opts.private_key, encode(private_key.to_bytes())).await?;
         private_key
     };
-    let pubkey = Arc::new(private_key.public_key());
+    let pubkey = PublicKey::from(&private_key);
 
     let (external_address, nat_type) = nat_detection
         .await
@@ -112,7 +110,7 @@ pub async fn event_loop(
     debug!("local ips: {local_ips:?}");
     let address_reply = client
         .get_addresses(AddressRequest {
-            wg_public_key: Vec::from(private_key.public_key().as_bytes()),
+            wg_public_key: Vec::from(pubkey.as_bytes().as_ref()),
             nat_type: nat_type.into(),
             node_flags: Some(NodeFlags {
                 monitor: start_opts.monitor,
@@ -158,7 +156,7 @@ pub async fn event_loop(
     // TODO: only create overlay interface when overlay ips are present
     let mut mac_bytes = Vec::with_capacity(6);
     mac_bytes.push(0xaa);
-    mac_bytes.extend_from_slice(&private_key.public_key().as_bytes()[0..5]);
+    mac_bytes.extend_from_slice(&PublicKey::from(&private_key).as_bytes().as_ref()[0..5]);
     let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
     let overlay_interface = DefaultOverlayInterface::create_overlay_device(
         format!("{}-vxlan", device_name),
@@ -208,7 +206,8 @@ pub async fn event_loop(
                                 let endpoint = peer.endpoint.map(|x| match x {
                                     peer::Endpoint::Addr(x) => x.try_into().unwrap(),
                                 });
-                                let peer_pubkey = Arc::new(X25519PublicKey::from(peer.wg_public_key.as_slice()));
+                                let peer_publivkey_array : [u8; 32] = peer.wg_public_key.as_slice().try_into().expect_or_log("Invalid key length");
+                                let peer_pubkey = PublicKey::from(peer_publivkey_array);
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&peer_pubkey.as_bytes()[0..5]);
@@ -294,7 +293,8 @@ pub async fn event_loop(
                                 }
                             }
                             EventType::Deleted => {
-                                let peer_pubkey = Arc::new(X25519PublicKey::from(peer.wg_public_key.as_slice()));
+                                let peer_publivkey_array : [u8; 32] = peer.wg_public_key.as_slice().try_into().unwrap();
+                                let peer_pubkey = PublicKey::from(peer_publivkey_array);
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);

@@ -1,8 +1,8 @@
 use super::interface_trait::WireguardManagementInterface;
 
-use boringtun::crypto::{X25519PublicKey, X25519SecretKey};
+use x25519_dalek::{StaticSecret, PublicKey};
 use ipnet::IpNet;
-use std::{net::SocketAddr, num::NonZeroU16, process::Command, sync::Arc};
+use std::{net::SocketAddr, num::NonZeroU16, process::Command};
 use thiserror::Error;
 use tracing::debug;
 use wireguard_uapi::{
@@ -32,7 +32,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
 
     fn create_wireguard_device(
         device_name: String,
-        privkey: Arc<X25519SecretKey>,
+        privkey: StaticSecret,
         port: Option<NonZeroU16>,
         addresses: &[IpNet],
     ) -> Result<Self, Self::Error> {
@@ -54,13 +54,14 @@ impl WireguardManagementInterface for WireguardUapiInterface {
             .expect("failed to execute process");
         debug!("{:?}", output);
 
+        let privkey_bytes = privkey.to_bytes();
         let device = SetDevice {
             flags: vec![],
             fwmark: None,
             interface: DeviceInterface::Name(device_name.clone().into()),
             listen_port: port.map(NonZeroU16::into),
             peers: vec![],
-            private_key: Some(privkey.as_bytes().try_into().unwrap()),
+            private_key: Some(&privkey_bytes),
         };
         wg_socket.set_device(device)?;
 
@@ -88,13 +89,13 @@ impl WireguardManagementInterface for WireguardUapiInterface {
 
     fn set_peer(
         &mut self,
-        pubkey: Arc<X25519PublicKey>,
+        pubkey: PublicKey,
         endpoint: Option<SocketAddr>,
         persistent_keepalive: Option<NonZeroU16>,
         allowed_ips: &[IpNet],
     ) -> Result<(), Self::Error> {
         let mut device = SetDevice::from_ifname(self.device_name.clone());
-        let pubkey_arr = pubkey.as_bytes().try_into().unwrap();
+        let pubkey_arr = pubkey.as_bytes();
         let mut peer = SetPeer::from_public_key(&pubkey_arr);
 
         let endpoint_ref = endpoint.as_ref();
@@ -125,9 +126,9 @@ impl WireguardManagementInterface for WireguardUapiInterface {
             .map_err(WireguardUapiInterfaceError::from)
     }
 
-    fn remove_peer(&mut self, pubkey: Arc<X25519PublicKey>) -> Result<(), Self::Error> {
+    fn remove_peer(&mut self, pubkey: PublicKey) -> Result<(), Self::Error> {
         let mut device = SetDevice::from_ifname(self.device_name.clone());
-        let pubkey = pubkey.as_bytes().try_into().unwrap();
+        let pubkey = pubkey.as_bytes();
         let mut peer = SetPeer::from_public_key(&pubkey);
         peer = peer.flags(vec![WgPeerF::RemoveMe]);
         device = device.peers(vec![peer]);
