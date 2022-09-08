@@ -15,7 +15,7 @@ itertools = "0.10.3"
 
 #wireguard
 wireguard-uapi = "2.0.3"
-boringtun = "0.4.0"
+boringtun = "0.5.2"
 
 # grpc
 tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
