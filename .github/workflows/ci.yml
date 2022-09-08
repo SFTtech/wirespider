@@ -48,7 +48,7 @@ jobs:
       RUSTV: ${{ matrix.rust }}
     steps:
       - name: Install dependencies
-        run: apt -y install protobuf-compiler
+        run: sudo apt-get -y install protobuf-compiler
       - uses: actions/checkout@v2
       - name: Install Rust ${{ matrix.rust }}
         uses: actions-rs/toolchain@v1
