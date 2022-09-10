@@ -18,7 +18,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
 
     fn delete_device_if_exists(device_name: &str) {
         let output = Command::new("ip")
-            .args(&["link", "del", device_name])
+            .args(["link", "del", device_name])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -61,7 +61,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         debug!("{:?}", output);
 
         let output = Command::new("ip") // note: mtu is dependent on wireguard mtu
-            .args(&["link", "set", &device_name, "up"])
+            .args(["link", "set", &device_name, "up"])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -69,7 +69,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         for address in &addresses {
             let ip_str = address.to_string();
             let output = Command::new("ip")
-                .args(&["address", "add", "dev", &device_name, &ip_str])
+                .args(["address", "add", "dev", &device_name, &ip_str])
                 .output()
                 .expect("failed to execute process");
             debug!("{:?}", output);
@@ -159,7 +159,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
     fn remove_peer(&self, mac_addr: eui48::MacAddress) -> Result<(), Self::Error> {
         // TODO remove broadcast entry
         let output = Command::new("bridge")
-            .args(&[
+            .args([
                 "fdb",
                 "del",
                 &mac_addr.to_hex_string(),

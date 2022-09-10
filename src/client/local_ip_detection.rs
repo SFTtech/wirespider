@@ -19,7 +19,7 @@ pub async fn check_local_ips(
     let results = join_all(
         destinations
             .iter()
-            .map(|x| check_ip(*x, priv_key.clone(), pub_key.clone())),
+            .map(|x| check_ip(*x, priv_key.clone(), pub_key)),
     )
     .await;
     for result in results {

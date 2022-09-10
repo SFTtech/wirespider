@@ -41,7 +41,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
         // create interface
         let output = Command::new("ip")
             // mtu 1432 for ipv4+pppoe, needs to be changed when ipv6 support is ready
-            .args(&[
+            .args([
                 "link",
                 "add",
                 &device_name,
@@ -68,14 +68,14 @@ impl WireguardManagementInterface for WireguardUapiInterface {
         for address in addresses {
             let ip_str = address.to_string();
             let output = Command::new("ip")
-                .args(&["address", "add", "dev", &device_name, &ip_str])
+                .args(["address", "add", "dev", &device_name, &ip_str])
                 .output()
                 .expect("failed to execute process");
             debug!("{:?}", output);
         }
 
         let output = Command::new("ip")
-            .args(&["link", "set", &device_name, "up"])
+            .args(["link", "set", &device_name, "up"])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -96,7 +96,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
     ) -> Result<(), Self::Error> {
         let mut device = SetDevice::from_ifname(self.device_name.clone());
         let pubkey_arr = pubkey.as_bytes();
-        let mut peer = SetPeer::from_public_key(&pubkey_arr);
+        let mut peer = SetPeer::from_public_key(pubkey_arr);
 
         let endpoint_ref = endpoint.as_ref();
         if let Some(endpoint) = endpoint_ref {
@@ -129,7 +129,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
     fn remove_peer(&mut self, pubkey: PublicKey) -> Result<(), Self::Error> {
         let mut device = SetDevice::from_ifname(self.device_name.clone());
         let pubkey = pubkey.as_bytes();
-        let mut peer = SetPeer::from_public_key(&pubkey);
+        let mut peer = SetPeer::from_public_key(pubkey);
         peer = peer.flags(vec![WgPeerF::RemoveMe]);
         device = device.peers(vec![peer]);
         self.wg_socket
@@ -165,7 +165,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
         let args = ["route", "del", net_str.as_str(), "via", via_str.as_str()];
 
         let output = Command::new("ip")
-            .args(&args)
+            .args(args)
             .output()
             .expect("failed to execute process");
 
@@ -175,7 +175,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
 
     fn delete_device_if_exists(device_name: &str) {
         let output = Command::new("ip")
-            .args(&["link", "del", device_name])
+            .args(["link", "del", device_name])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
@@ -191,12 +191,12 @@ impl WireguardManagementInterface for WireguardUapiInterface {
 impl Drop for WireguardUapiInterface {
     fn drop(&mut self) {
         let output = Command::new("ip")
-            .args(&["link", "set", &self.device_name, "down"])
+            .args(["link", "set", &self.device_name, "down"])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);
         let output = Command::new("ip")
-            .args(&["link", "del", &self.device_name])
+            .args(["link", "del", &self.device_name])
             .output()
             .expect("failed to execute process");
         debug!("{:?}", output);

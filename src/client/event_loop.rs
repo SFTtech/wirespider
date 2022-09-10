@@ -260,14 +260,14 @@ pub async fn event_loop(
                                 interface
                                     .lock()
                                     .await
-                                    .set_peer(peer_pubkey.clone(), endpoint, keep_alive, &allowed_ips)
+                                    .set_peer(peer_pubkey, endpoint, keep_alive, &allowed_ips)
                                     .unwrap_or_log();
                                 debug!("getting local ips");
                                 let local_sock_addrs = peer.local_ips.iter().map(|x| x.try_into().map(|x : IpAddr| SocketAddr::from((x, peer_port)))).collect::<Result<Vec<_>,_>>().unwrap_or_log();
-                                let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey.clone()).await.unwrap_or_log();
+                                let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey).await.unwrap_or_log();
                                 debug!("Got local endpoint: {:?}", local_endpoint);
                                 if local_endpoint.is_some() && local_endpoint != endpoint {
-                                    interface.lock().await.set_peer(peer_pubkey.clone(), local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
                                     create = true;
                                     // send a single packet to this peer to redo the handshake
                                     if let Ok(socket) = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await {
@@ -285,8 +285,8 @@ pub async fn event_loop(
                                     // The monitor component will check for handshakes and if successfull handshakes are discovered
                                     // it will set the actual allowed ips.
                                     debug!("removing allowed ips");
-                                    interface.lock().await.remove_peer(peer_pubkey.clone()).unwrap_or_log();
-                                    interface.lock().await.set_peer(peer_pubkey.clone(), None, keep_alive, &[]).unwrap_or_log();
+                                    interface.lock().await.remove_peer(peer_pubkey).unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, None, keep_alive, &[]).unwrap_or_log();
                                 }
                                 let overlay_ip = peer.overlay_ips.into_iter().next();
                                 if let Some(dest_net) = overlay_ip {
