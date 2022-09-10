@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
-use x25519_dalek::{StaticSecret, PublicKey};
 use base64::{decode, encode};
 use eui48::MacAddress;
 use ipnet::IpNet;
@@ -18,6 +17,7 @@ use tracing_unwrap::ResultExt;
 use wirespider::protocol::{
     event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags,
 };
+use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::client::{
     connect, interface::OverlayManagementInterface, local_ip_detection::check_local_ips,
@@ -84,7 +84,10 @@ pub async fn event_loop(
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
             .await
             .expect("Could not read private key");
-        let secret_key_bytes : [u8;32] = decode(private_key_encoded).expect("Could not decode private key").try_into().unwrap();
+        let secret_key_bytes: [u8; 32] = decode(private_key_encoded)
+            .expect("Could not decode private key")
+            .try_into()
+            .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
         let private_key = StaticSecret::new(OsRng::default());

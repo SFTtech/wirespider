@@ -1,4 +1,3 @@
-use x25519_dalek::PublicKey;
 use std::collections::HashMap;
 use std::num::NonZeroU16;
 use std::sync::Arc;
@@ -14,6 +13,7 @@ use wirespider::protocol::peer_identifier::Identifier;
 use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::ChangePeerRequest;
 use wirespider::protocol::PeerIdentifier;
+use x25519_dalek::PublicKey;
 
 use crate::client::client_state::ClientState;
 use futures::StreamExt;

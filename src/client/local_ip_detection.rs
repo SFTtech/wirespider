@@ -7,8 +7,8 @@ use tokio::time::timeout;
 use tracing::instrument;
 use tracing_unwrap::ResultExt;
 
-use x25519_dalek::{StaticSecret, PublicKey};
 use boringtun::noise::Tunn;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 #[instrument(skip(priv_key, pub_key))]
 pub async fn check_local_ips(
@@ -31,7 +31,7 @@ pub async fn check_local_ips(
     Ok(None)
 }
 
-#[instrument(skip(priv_key,pub_key))]
+#[instrument(skip(priv_key, pub_key))]
 async fn check_ip(
     dest: SocketAddr,
     priv_key: StaticSecret,

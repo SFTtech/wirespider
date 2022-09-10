@@ -1,6 +1,5 @@
 use super::interface_trait::WireguardManagementInterface;
 
-use x25519_dalek::{StaticSecret, PublicKey};
 use ipnet::IpNet;
 use std::{net::SocketAddr, num::NonZeroU16, process::Command};
 use thiserror::Error;
@@ -10,6 +9,7 @@ use wireguard_uapi::{
     set::{Device as SetDevice, Peer as SetPeer, WgPeerF},
     DeviceInterface, WgSocket,
 };
+use x25519_dalek::{PublicKey, StaticSecret};
 
 pub struct WireguardUapiInterface {
     device_name: String,

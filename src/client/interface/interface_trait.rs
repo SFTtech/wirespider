@@ -1,13 +1,13 @@
-use x25519_dalek::{StaticSecret, PublicKey};
 use eui48::MacAddress;
 use ipnet::IpNet;
 use std::{
     error::Error,
     fmt::Debug,
     net::{IpAddr, SocketAddr},
-    num::NonZeroU16
+    num::NonZeroU16,
 };
 use wireguard_uapi::get::Device;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 pub trait WireguardManagementInterface: Sized {
     type Error: Send + Debug + Error;
