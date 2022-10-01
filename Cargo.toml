@@ -11,7 +11,7 @@ description = "Wirespider distributes wireguard tunnel configurations and routes
 clap = { version = "3.2.20", features = ["derive","env"] }
 clap_complete = "3.2.4"
 lazy_static = "1.4.0"
-itertools = "0.10.3"
+itertools = "0.10.5"
 
 #wireguard
 wireguard-uapi = "2.0.3"
