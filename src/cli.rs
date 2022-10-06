@@ -3,7 +3,7 @@ use std::{
     num::NonZeroU16,
 };
 
-use clap::{ArgEnum, ArgGroup, Args, Parser, Subcommand, ValueHint};
+use clap::{ValueEnum, ArgGroup, Args, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use ipnet::IpNet;
 use tonic::transport::Uri;
@@ -22,7 +22,7 @@ pub struct ServerRunCommand {
     pub bind: SocketAddr,
 }
 
-#[derive(Debug, ArgEnum, Clone)]
+#[derive(Debug, ValueEnum, Clone)]
 pub enum NatType {
     #[clap(name = "no-nat")]
     NoNat,
@@ -63,11 +63,11 @@ pub struct CreateNetworkCommand {
     pub db: DatabaseOptions,
     #[clap(help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
     pub network: IpNet,
-    #[clap(arg_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
+    #[clap(value_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
     pub network_type: NetworkType,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, ArgEnum, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum, Debug)]
 pub enum NetworkType {
     Wireguard,
     Vxlan,
@@ -85,7 +85,7 @@ pub struct DeleteNetworkCommand {
 pub struct ParamIPNet {
     #[clap(
         required = true,
-        parse(try_from_str),
+        value_parser,
         help = "Network in CIDR notation (e.g. 192.168.1.0/24)"
     )]
     pub ipnet: IpNet,
@@ -98,7 +98,7 @@ pub struct CreateAdminCommand {
     pub db: DatabaseOptions,
     #[clap(required = true, help = "Name of the admin")]
     pub name: String,
-    #[clap(required = true, min_values = 1, help = "IPs to assign to this admin")]
+    #[clap(required = true, num_args = 1.., help = "IPs to assign to this admin")]
     pub addresses: Vec<IpNet>,
 }
 
@@ -141,7 +141,7 @@ pub enum Cli {
 
 #[derive(Args, Debug)]
 pub struct CompletionCommand {
-    #[clap(help = "Shell type", possible_values = ["bash","elvish","fish","powershell","zsh"] )]
+    #[clap(help = "Shell type", value_parser = ["bash","elvish","fish","powershell","zsh"])]
     pub shell: Shell,
 }
 
@@ -154,14 +154,14 @@ pub struct BaseOptions {
 
 #[derive(Debug, Args)]
 pub struct ConnectionOptions {
-    #[clap(short, long, parse(try_from_str), env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
+    #[clap(short, long, value_parser, env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
     pub endpoint: Uri,
 
     /// Token for authentication
     #[clap(
         short,
         long,
-        parse(try_from_str),
+        value_parser,
         env = "WS_TOKEN",
         help = "Token used for authentication"
     )]
@@ -216,7 +216,7 @@ pub struct ClientStartCommand {
     pub fixed_endpoint: Option<SocketAddr>,
     #[clap(
         long,
-        arg_enum,
+        value_enum,
         env = "WS_NAT_TYPE",
         default_value = "no-nat",
         help = "When using a fixed endpoint report this NAT type"
@@ -281,7 +281,7 @@ pub struct AddPeerCommand {
     pub permission_level: i32,
     #[clap(help = "Name of the peer")]
     pub name: String,
-    #[clap(required = true, min_values = 1, help = "IPs to assign to this peer")]
+    #[clap(required = true, num_args = 1.., help = "IPs to assign to this peer")]
     pub addresses: Vec<IpNet>,
 }
 

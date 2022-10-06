@@ -1,7 +1,7 @@
 mod cli;
 mod client;
 mod server;
-use clap::{IntoApp, Parser};
+use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use cli::{Cli, CompletionCommand};
 use client::{client_manage, client_start};
