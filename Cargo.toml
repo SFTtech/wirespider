@@ -16,7 +16,9 @@ itertools = "0.10.5"
 #wireguard
 wireguard-uapi = "2.0.3"
 boringtun = "0.5"
-x25519-dalek = "2.0.0-pre.1"
+x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0", features = ["serde"]}
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
+curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5", features = ["serde"]}
 
 # grpc
 tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
@@ -27,11 +29,17 @@ async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 typed-builder = "0.11.0"
 
+# tarpc
+tarpc = { version = "0.30", default-features = false, features = ["tokio1", "serde-transport", "serde-transport-bincode"] }
+serde = "1"
+bincode = "1"
+serde_json = "1"
+
 #database
 sqlx = { version = "0.6", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.13"
 rand = { version = "0.8", features = ["getrandom"] }
-ipnet = "2.4"
+ipnet = { version = "2.4", features = ["serde"] }
 iprange = "0.6.7"
 eui48 = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -98,3 +106,8 @@ assets = [
     { source = "completions/_wirespider", dest = "/usr/share/zsh/site-functions/_wirespider", mode = "644" },
     { source = "completions/wirespider.bash", dest = "/usr/share/bash-completion/completions/wirespider", mode = "644" },
 ]
+
+[patch.crates-io]
+x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0"}
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps"}
+curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5"}

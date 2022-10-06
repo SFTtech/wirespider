@@ -478,7 +478,7 @@ impl Wirespider for WirespiderServerState {
             return Err(Status::permission_denied("Not allowed to relay"));
         }
 
-        if auth_peer.nat_type != requested_nat_type.into() {
+        if auth_peer.nat_type != <wirespider::protocol::NatType as Into<i32>>::into(requested_nat_type) {
             updated = true;
             auth_peer.nat_type = requested_nat_type.into();
         }

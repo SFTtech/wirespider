@@ -1,5 +1,7 @@
 pub type WireguardKey = [u8; 32];
 
+pub mod rpc;
+
 pub mod protocol {
     #![allow(non_camel_case_types)]
     tonic::include_proto!("wirespider"); // The string specified here must match the proto package name
