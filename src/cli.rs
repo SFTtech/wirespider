@@ -6,14 +6,15 @@ use std::{
 use clap::{ValueEnum, ArgGroup, Args, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use ipnet::IpNet;
+use serde::de::value;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
 #[derive(Debug, Args)]
 pub struct ServerRunCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: ServerBaseOptions,
-    #[clap(
+    #[arg(
         short,
         long,
         default_value = "0.0.0.0:49582",
@@ -24,46 +25,46 @@ pub struct ServerRunCommand {
 
 #[derive(Debug, ValueEnum, Clone)]
 pub enum NatType {
-    #[clap(name = "no-nat")]
+    #[value(name = "no-nat")]
     NoNat,
-    #[clap(name = "full-cone")]
+    #[value(name = "full-cone")]
     FullCone,
-    #[clap(name = "restricted-cone")]
+    #[value(name = "restricted-cone")]
     RestrictedCone,
-    #[clap(name = "port-restricted-cone")]
+    #[value(name = "port-restricted-cone")]
     PortRestrictedCone,
-    #[clap(name = "symmetric")]
+    #[value(name = "symmetric")]
     Symmetric,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ServerDatabaseCommand {
-    #[clap(name = "create-admin")]
+    #[command(name = "create-admin")]
     CreateAdmin(CreateAdminCommand),
 
-    #[clap(flatten)]
+    #[command(flatten)]
     Network(NetworkCommand),
 
-    #[clap(name = "migrate", about = "Run database migrations")]
+    #[command(name = "migrate", about = "Run database migrations")]
     Migrate(DatabaseOptions),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum NetworkCommand {
-    #[clap(name = "create-network", about = "Create network")]
+    #[command(name = "create-network", about = "Create network")]
     Create(CreateNetworkCommand),
-    #[clap(name = "delete-network", about = "Delete network")]
+    #[command(name = "delete-network", about = "Delete network")]
     Delete(DeleteNetworkCommand),
 }
 
 #[derive(Debug, Args)]
-#[clap(about = "create a new network")]
+#[command(about = "create a new network")]
 pub struct CreateNetworkCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub db: DatabaseOptions,
-    #[clap(help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
+    #[arg(help = "Network in CIDR notation (e.g. 192.168.1.0/24)")]
     pub network: IpNet,
-    #[clap(value_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
+    #[arg(value_enum, default_value_t = NetworkType::Wireguard, help = "Network type")]
     pub network_type: NetworkType,
 }
 
@@ -75,64 +76,63 @@ pub enum NetworkType {
 
 #[derive(Debug, Args)]
 pub struct DeleteNetworkCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub db: DatabaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub ipnet: ParamIPNet,
 }
 
 #[derive(Debug, Args)]
 pub struct ParamIPNet {
-    #[clap(
+    #[arg(
         required = true,
-        value_parser,
         help = "Network in CIDR notation (e.g. 192.168.1.0/24)"
     )]
     pub ipnet: IpNet,
 }
 
 #[derive(Debug, Args)]
-#[clap(about = "create a new admin account")]
+#[command(about = "create a new admin account")]
 pub struct CreateAdminCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub db: DatabaseOptions,
-    #[clap(required = true, help = "Name of the admin")]
+    #[arg(required = true, help = "Name of the admin")]
     pub name: String,
-    #[clap(required = true, num_args = 1.., help = "IPs to assign to this admin")]
+    #[arg(required = true, num_args = 1.., help = "IPs to assign to this admin")]
     pub addresses: Vec<IpNet>,
 }
 
 #[derive(Debug, Args)]
 pub struct ServerBaseOptions {
     // enable debug
-    #[clap(long, help = "Enable debug output")]
+    #[arg(long, help = "Enable debug output")]
     pub debug: bool,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub db: DatabaseOptions,
 }
 
 #[derive(Debug, Args)]
 pub struct DatabaseOptions {
-    #[clap(short('d'), long, env, value_hint = ValueHint::Url, help = "URL to database. Needs to start with \"sqlite:\"")]
+    #[arg(short('d'), long, env, value_hint = ValueHint::Url, help = "URL to database. Needs to start with \"sqlite:\"")]
     pub database_url: String,
 }
 
 #[derive(Parser, Debug)]
-#[clap(name = "spider")]
+#[command(name = "spider")]
 pub enum Cli {
-    #[clap(name = "start-client", about = "Start the Wirespider client")]
+    #[command(name = "start-client", about = "Start the Wirespider client")]
     ClientStart(ClientStartCommand),
-    #[clap(
+    #[command(
         subcommand,
         name = "send-command",
         about = "Send commands to the server"
     )]
     ClientManage(ClientManageCommand),
-    #[clap(name = "start-server", about = "Start the Wirespider server")]
+    #[command(name = "start-server", about = "Start the Wirespider server")]
     ServerStart(ServerRunCommand),
-    #[clap(subcommand, name = "database", about = "Manage the server database")]
+    #[command(subcommand, name = "database", about = "Manage the server database")]
     ServerManage(ServerDatabaseCommand),
-    #[clap(
+    #[command(
         name = "generate-completion",
         about = "Generate completion scripts for various shells"
     )]
@@ -141,27 +141,26 @@ pub enum Cli {
 
 #[derive(Args, Debug)]
 pub struct CompletionCommand {
-    #[clap(help = "Shell type", value_parser = ["bash","elvish","fish","powershell","zsh"])]
+    #[arg(help = "Shell type", value_parser = ["bash","elvish","fish","powershell","zsh"])]
     pub shell: Shell,
 }
 
 #[derive(Debug, Args)]
 pub struct BaseOptions {
     /// enable debug
-    #[clap(short, long, help = "Enable debugging")]
+    #[arg(short, long, help = "Enable debugging")]
     pub debug: bool,
 }
 
 #[derive(Debug, Args)]
 pub struct ConnectionOptions {
-    #[clap(short, long, value_parser, env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
+    #[arg(short, long, env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
     pub endpoint: Uri,
 
     /// Token for authentication
-    #[clap(
+    #[arg(
         short,
         long,
-        value_parser,
         env = "WS_TOKEN",
         help = "Token used for authentication"
     )]
@@ -170,11 +169,11 @@ pub struct ConnectionOptions {
 
 #[derive(Debug, Args)]
 pub struct ClientStartCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(
+    #[arg(
         required = true,
         short = 'i',
         long,
@@ -182,39 +181,39 @@ pub struct ClientStartCommand {
         help = "Device name to use for wireguard."
     )]
     pub device: String,
-    #[clap(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY", help = "Path to wireguard private key")]
+    #[arg(short = 'k', long, default_value = "privkey", value_hint = ValueHint::FilePath, env = "WS_PRIVATE_KEY", help = "Path to wireguard private key")]
     pub private_key: String,
-    #[clap(
+    #[arg(
         long,
         env = "WS_NODE_MONITOR",
         help = "Request monitor role in network"
     )]
     pub monitor: bool,
-    #[clap(long, env = "WS_NODE_RELAY", help = "Request relay role in network")]
+    #[arg(long, env = "WS_NODE_RELAY", help = "Request relay role in network")]
     pub relay: bool,
-    #[clap(
+    #[arg(
         long,
         default_value = "25",
         env = "WS_KEEP_ALIVE",
         help = "Keepalive for wireguard"
     )]
     pub keep_alive: NonZeroU16,
-    #[clap(short, long, env = "WS_LISTEN_PORT", help = "Wireguard listen port")]
+    #[arg(short, long, env = "WS_LISTEN_PORT", help = "Wireguard listen port")]
     pub port: Option<NonZeroU16>,
-    #[clap(
+    #[arg(
         long,
         env = "WS_STUN_HOST",
         default_value = "stun.stunprotocol.org:3478",
         help = "Stun server to use, must support RFC 5780"
     )]
     pub stun_host: String,
-    #[clap(
+    #[arg(
         long,
         env = "WS_FIXED_ENDPOINT",
         help = "Skip NAT detection, report this endpoint and send NAT type \"NoNAT\" to server unless another NAT type is specified"
     )]
     pub fixed_endpoint: Option<SocketAddr>,
-    #[clap(
+    #[arg(
         long,
         value_enum,
         env = "WS_NAT_TYPE",
@@ -226,38 +225,38 @@ pub struct ClientStartCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ClientManageCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     Peer(ClientManagePeerCommand),
-    #[clap(flatten)]
+    #[command(flatten)]
     Route(ClientManageRouteCommand),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ClientManagePeerCommand {
-    #[clap(name = "add-peer", about = "Add peer")]
+    #[command(name = "add-peer", about = "Add peer")]
     Add(AddPeerCommand),
-    #[clap(name = "change-peer", about = "Change peer properties")]
+    #[command(name = "change-peer", about = "Change peer properties")]
     Change(ChangePeerCommand),
-    #[clap(name = "delete-peer", about = "Delete peer")]
+    #[command(name = "delete-peer", about = "Delete peer")]
     Delete(DeletePeerCommand),
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ClientManageRouteCommand {
-    #[clap(name = "add-route", about = "Add new route")]
+    #[command(name = "add-route", about = "Add new route")]
     Add(AddRouteCommand),
-    #[clap(name = "delete-route", about = "Delete route")]
+    #[command(name = "delete-route", about = "Delete route")]
     Delete(DeleteRouteCommand),
 }
 
 #[derive(Debug, Args)]
-#[clap(group = ArgGroup::new("peer_identifier").required(true))]
+#[command(group = ArgGroup::new("peer_identifier").required(true))]
 pub struct CliPeerIdentifier {
-    #[clap(long, group = "peer_identifier", help = "Name of the target peer")]
+    #[arg(long, group = "peer_identifier", help = "Name of the target peer")]
     pub name_id: Option<String>,
-    #[clap(long, group = "peer_identifier", help = "Token of the target peer")]
+    #[arg(long, group = "peer_identifier", help = "Token of the target peer")]
     pub token_id: Option<Uuid>,
-    #[clap(
+    #[arg(
         long,
         group = "peer_identifier",
         help = "Public key (base64) of the target peer"
@@ -267,11 +266,11 @@ pub struct CliPeerIdentifier {
 
 #[derive(Debug, Args)]
 pub struct AddPeerCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(
+    #[arg(
         short,
         long,
         default_value = "0",
@@ -279,54 +278,54 @@ pub struct AddPeerCommand {
         long_help = "Permission level of the new user (Admin: 100, Relay: 50, Monitor: 25, Normal users: 0)"
     )]
     pub permission_level: i32,
-    #[clap(help = "Name of the peer")]
+    #[arg(help = "Name of the peer")]
     pub name: String,
-    #[clap(required = true, num_args = 1.., help = "IPs to assign to this peer")]
+    #[arg(required = true, num_args = 1.., help = "IPs to assign to this peer")]
     pub addresses: Vec<IpNet>,
 }
 
 #[derive(Debug, Args)]
 pub struct ChangePeerCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub peer: CliPeerIdentifier,
-    #[clap(help = "Endpoint to report to other peers")]
+    #[arg(help = "Endpoint to report to other peers")]
     pub new_endpoint: SocketAddr,
 }
 
 #[derive(Debug, Args)]
 pub struct DeletePeerCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub peer: CliPeerIdentifier,
 }
 
 #[derive(Debug, Args)]
 pub struct AddRouteCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(help = "Network to route")]
+    #[arg(help = "Network to route")]
     pub net: IpNet,
-    #[clap(help = "Destination IP of this route")]
+    #[arg(help = "Destination IP of this route")]
     pub via: IpAddr,
 }
 
 #[derive(Debug, Args)]
 pub struct DeleteRouteCommand {
-    #[clap(flatten)]
+    #[command(flatten)]
     pub base: BaseOptions,
-    #[clap(flatten)]
+    #[command(flatten)]
     pub connection: ConnectionOptions,
-    #[clap(help = "Network to route")]
+    #[arg(help = "Network to route")]
     pub net: IpNet,
-    #[clap(help = "Destination IP of this route")]
+    #[arg(help = "Destination IP of this route")]
     pub via: IpAddr,
 }
