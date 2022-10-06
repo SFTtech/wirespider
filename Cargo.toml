@@ -73,6 +73,7 @@ clap = { version = "4", features = ["derive","env"] }
 clap_complete = "4"
 uuid = "1"
 ipnet = "2.4.0"
+serde = "1"
 tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
 
 
