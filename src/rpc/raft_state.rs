@@ -1,6 +1,7 @@
 use std::{collections::HashSet, pin::Pin};
 use std::time::{Duration, Instant};
 
+use boringtun::device::peer::Peer;
 use rand::Rng;
 use sqlx::{prelude::*, query, SqlitePool};
 use serde_json::{from_str, to_string};
@@ -35,7 +36,7 @@ pub struct RaftPersistentState {
 
 #[derive(Clone)]
 pub enum RaftRole {
-    Follower,
+    Follower(PeerId),
     Candidate(HashSet<PeerId, bool>),
     Leader(LeaderState),
 }
@@ -61,9 +62,11 @@ pub enum RaftStateError {
 impl RaftState {
     async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
         let persistent = RaftPersistentState::from_db(&pool).await?;
+        let key_bytes : Vec<u8> = query("SELECT FROM settings WHERE name='last_leader'").fetch_one(&pool).await?.try_get("value")?;
+        let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
         Ok(RaftState {
             pool,
-            role: RaftRole::Follower,
+            role: RaftRole::Follower(last_known_leader),
             persistent: persistent,
             volatile: todo!(),
             election_timeout: todo!(),

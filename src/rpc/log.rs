@@ -1,19 +1,19 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteArguments;
-use sqlx::{SqlitePool, sqlite::SqliteRow};
+use sqlx::{sqlite::SqliteRow, SqlitePool};
 use tracing_unwrap::ResultExt;
 
 use super::{ClusterStateUpdate, NodeState};
+use serde_json::{from_str, to_string};
+use sqlx::query;
+use sqlx::{prelude::*, Arguments};
 use std::collections::BTreeMap;
 use thiserror::Error;
-use sqlx::{prelude::*, Arguments};
-use sqlx::query;
-use serde_json::{from_str, to_string};
 
 #[derive(Debug, Default)]
 pub struct Log {
     commited_index: u64,
-    entries: BTreeMap<u64,LogEntry>,
+    entries: BTreeMap<u64, LogEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,25 +33,36 @@ pub enum LogError {
     #[error(transparent)]
     DbError(#[from] sqlx::Error),
     #[error("Could not deserialize state")]
-    DeserializeError(#[from] serde_json::Error)
+    DeserializeError(#[from] serde_json::Error),
 }
 
 impl Log {
     pub async fn from_db(pool: &SqlitePool) -> Result<Log, LogError> {
-        todo!()
+        let mut connection = pool.acquire().await?;
+        let commited_index = query("SELECT value FROM state WHERE key='commited_index'")
+            .fetch_one(&mut connection)
+            .await?
+            .get::<i64, &str>("value")
+            .try_into()
+            .expect_or_log("Could not convert to u64, probably invalid data in DB");
+        let entries = BTreeMap::new();
+        Ok(Log {
+            commited_index,
+            entries,
+        })
     }
     pub async fn store(&self, pool: &SqlitePool) -> Result<(), LogError> {
         let mut transaction = pool.begin().await?;
         query("DELETE FROM log").execute(&mut transaction).await?;
-        let insert = pool.prepare("INSERT INTO log (index, term, value) VALUES (?, ?, ?)").await?;
+        let insert = pool
+            .prepare("INSERT INTO log (index, term, value) VALUES (?, ?, ?)")
+            .await?;
         for entry in &self.entries {
             let mut args = SqliteArguments::default();
             args.add(TryInto::<i64>::try_into(*entry.0).unwrap_or_log());
             args.add(TryInto::<i64>::try_into(entry.1.term).unwrap_or_log());
             args.add(to_string(&entry.1.data).unwrap_or_log());
-            insert
-                .query_with(args)
-                .execute(&mut transaction).await?;
+            insert.query_with(args).execute(&mut transaction).await?;
         }
         transaction.commit().await?;
         Ok(())
@@ -74,11 +85,13 @@ impl Log {
     }
 }
 
-
 impl FromRow<'_, SqliteRow> for LogEntry {
     fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
         Ok(Self {
-            term: row.try_get::<i64,&str>("term")?.try_into().expect_or_log("Invalid log index"),
+            term: row
+                .try_get::<i64, &str>("term")?
+                .try_into()
+                .expect_or_log("Invalid log index"),
             data: from_str(row.try_get("data")?).expect_or_log("Error deserializing log data"),
         })
     }

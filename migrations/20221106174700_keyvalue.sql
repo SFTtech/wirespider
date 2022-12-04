@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS state
 (
     key     TEXT NOT NULL UNIQUE,
-    value   TEXT,
+    value   BLOB,
 );
 
-INSERT INTO state (key) VALUES ("raft");
+INSERT INTO state (key) VALUES ("raft"), ("commited_index");

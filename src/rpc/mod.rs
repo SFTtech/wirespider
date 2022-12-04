@@ -19,8 +19,11 @@ use log::LogEntry;
 //use signed::Signed;
 use tracing_unwrap::ResultExt;
 
+use self::raft_state::RaftRole;
+
 type PeerId = ed25519_dalek::PublicKey;
 type WireguardKey = x25519_dalek::PublicKey;
+
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,7 +115,7 @@ pub trait NodeService {
     async fn get_version() -> Version;
     async fn append_entries(
         term: u64,
-        leader_id: u64,
+        leader_id: PeerId,
         prev_log_index: u64,
         prev_log_term: u64,
         entries: Vec<LogEntry>,
@@ -148,7 +151,7 @@ impl NodeService for Service {
     async fn append_entries(
         self, _: context::Context,
         term: u64,
-        leader_id: u64,
+        leader_id: PeerId,
         prev_log_index: u64,
         prev_log_term: u64,
         entries: Vec<LogEntry>,
@@ -169,6 +172,7 @@ impl NodeService for Service {
         }
         state.persistent.log_append(entries);
         state.persistent.commit_until(leader_commit).await;
+        state.role = RaftRole::Follower(leader_id);
         (term, true)
     }
 
