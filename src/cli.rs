@@ -6,7 +6,6 @@ use std::{
 use clap::{ValueEnum, ArgGroup, Args, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use ipnet::IpNet;
-use serde::de::value;
 use tonic::transport::Uri;
 use uuid::Uuid;
 

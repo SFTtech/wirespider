@@ -1,33 +1,27 @@
 use std::collections::HashSet;
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
+use std::sync::Arc;
 
+use ed25519_dalek::PublicKey;
 use ipnet::IpNet;
-use rand::rngs::StdRng;
-use rand::{CryptoRng, rngs::OsRng};
-use tarpc::context::Context;
-use serde::{Serialize, Deserialize};
-use tarpc::serde_transport as transport;
-use tarpc::server::{BaseChannel, Channel};
-use tarpc::tokio_serde::formats::Bincode;
-use tarpc::tokio_util::codec::length_delimited::LengthDelimitedCodec;
-use tokio::net::{UnixListener, UnixStream};
-use ed25519_dalek::{PublicKey, Signature, Verifier, Signer};
-use tarpc::{
-    client, context,
-    server::{self, incoming::Incoming},
-};
+use serde::{Deserialize, Serialize};
+use tarpc::context;
 
-pub mod signed;
-use signed::Signed;
+use tokio::sync::RwLock;
+
+pub mod raft_state;
+use raft_state::RaftState;
+
+pub mod log;
+use log::LogEntry;
+
+//pub mod signed;
+//use signed::Signed;
+use tracing_unwrap::ResultExt;
 
 type PeerId = ed25519_dalek::PublicKey;
 type WireguardKey = x25519_dalek::PublicKey;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PeerInfo {
-    state: State,
-    connections: Vec<PeerConnection>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Version {
@@ -36,24 +30,30 @@ pub struct Version {
     patch: u16,
 }
 
+const WIRESPIDER_VERSION : Version = Version {major: 0, minor: 4, patch: 0};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PeerInfo {
+    state: NodeState,
+    connections: Vec<PeerConnection>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum NatType {
     NoNat,
     FullCone,
     RestrictedCone,
     PortRestrictedCone,
-    Symmetric
+    Symmetric,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct State {
+pub struct NodeState {
     node: PeerId,
-    timestamp: u64,
     wireguard_key: PublicKey,
     public_endpoint: String,
     nat_type: NatType,
     external_ips: Vec<SocketAddr>,
-    last_seen_log_entry: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,17 +63,10 @@ pub enum ConnectionState {
     IndirectConnection,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ClusterState {
-    log: Vec<Signed<ClusterStateEntry>>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub enum Permission {
     Mesh,
-    Monitor,
-    Route,
-    Sign,
+    Server,
     Admin,
 }
 
@@ -88,15 +81,14 @@ pub struct ClusterNodeState {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClusterNetwork {
     Wireguard(IpNet),
-    VXLAN{net: IpNet, vni: u32},
+    VXLAN { net: IpNet, vni: u32 },
 }
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClusterStateUpdate {
     Add(ClusterNodeState),
     Change(ClusterNodeState),
-    Remove(PeerId)
+    Remove(PeerId),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,31 +109,106 @@ pub struct PeerConnection {
 
 #[tarpc::service]
 pub trait NodeService {
-    async fn get_peer_info() -> Signed<PeerInfo>;
     async fn get_version() -> Version;
-    async fn update_state(state: Signed<State>, targets: Vec<PeerId>);
-    async fn get_cluster_state(last_known: u64) -> ClusterState;
+    async fn append_entries(
+        term: u64,
+        leader_id: u64,
+        prev_log_index: u64,
+        prev_log_term: u64,
+        entries: Vec<LogEntry>,
+        leader_commit: u64,
+    ) -> (u64, bool);
+    async fn request_vote(
+        term: u64,
+        candidate_id: PeerId,
+        last_log_index: u64,
+        last_log_term: u64,
+    ) -> (u64, bool);
+    async fn install_snapshot(
+        term: u64,
+        leader_id: PeerId,
+        last_included_index: u64,
+        last_included_term: u64,
+        data: Vec<u8>,
+        last: bool,
+    ) -> u64;
 }
 
-#[derive(Clone)]
-struct Service;
+
+struct Service {
+    raft_state: Arc<RwLock<RaftState>>,
+}
 
 #[tarpc::server]
 impl NodeService for Service {
-    async fn get_peer_info(self, _: context::Context) -> Signed<PeerInfo> {
-        todo!();
-    }
     async fn get_version(self, _: context::Context) -> Version {
-        todo!();
-    }
-    async fn update_state(self, _: context::Context, _state: Signed<State>, _targets: Vec<PeerId>) {
-        todo!();
+        return WIRESPIDER_VERSION;
     }
 
-    async fn get_cluster_state(self, _: context::Context, _last_known: u64) -> ClusterState {
-        todo!();
+    async fn append_entries(
+        self, _: context::Context,
+        term: u64,
+        leader_id: u64,
+        prev_log_index: u64,
+        prev_log_term: u64,
+        entries: Vec<LogEntry>,
+        leader_commit: u64,
+    ) -> (u64, bool) {
+        let mut state = self.raft_state.write().await;
+        let current_term = state.persistent.current_term;
+        if current_term > term {
+            return (current_term, false);
+        }
+        state.election_timeout.reset();
+        if state.persistent.current_term < term {
+            state.persistent.current_term = term;
+            state.commit_persistent().await.unwrap_or_log();
+        }
+        if ! state.persistent.log_contains(prev_log_index, prev_log_term) {
+            return (term, false);
+        }
+        state.persistent.log_append(entries);
+        state.persistent.commit_until(leader_commit).await;
+        (term, true)
+    }
+
+    async fn request_vote(
+        self, _: context::Context,
+        term: u64,
+        candidate_id: PeerId,
+        last_log_index: u64,
+        last_log_term: u64,
+    ) -> (u64, bool) {
+        let mut state = self.raft_state.write().await;
+        let (current_term, current_vote, current_log_index, current_log_term) = {
+            (state.persistent.current_term, state.persistent.current_vote, state.persistent.get_log_index(), state.persistent.get_log_term())
+        };
+        if term < current_term || current_vote.is_some() || current_log_index > last_log_index || current_log_term > last_log_term {
+            return (current_term, false);
+        }
+        // preconditions fulfilled, vote for candidate
+        state.persistent.current_vote.get_or_insert(candidate_id);
+
+        state.persistent.current_term = term;
+        state.commit_persistent().await.unwrap_or_log();
+        (state.persistent.current_term, true)
+    }
+
+    async fn install_snapshot(
+        self, _: context::Context,
+        _term: u64,
+        _leader_id: PeerId,
+        _last_included_index: u64,
+        _last_included_term: u64,
+        _data: Vec<u8>,
+        _last: bool,
+    ) -> u64 {
+        unimplemented!()
     }
 }
 
 
+#[test]
+fn test_node_service() {
 
+}

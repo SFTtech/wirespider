@@ -30,7 +30,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 typed-builder = "0.11.0"
 
 # tarpc
-tarpc = { version = "0.30", default-features = false, features = ["tokio1", "serde-transport", "serde-transport-bincode"] }
+tarpc = { version = "0.31", default-features = false, features = ["tokio1", "serde-transport", "serde-transport-bincode"] }
 serde = "1"
 bincode = "1"
 serde_json = "1"
@@ -48,7 +48,7 @@ uuid = { version = "1", features = ["v4"] }
 tracing = {version = "0.1", features = ["release_max_level_debug"] }
 tracing-subscriber = "0.3"
 tracing-error = "0.2"
-tracing-unwrap = "0.9"
+tracing-unwrap = "0.10"
 
 # error handling
 anyhow = "1"
