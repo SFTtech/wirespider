@@ -40,7 +40,7 @@ uuid = { version = "1", features = ["v4"] }
 tracing = {version = "0.1", features = ["release_max_level_debug"] }
 tracing-subscriber = "0.3"
 tracing-error = "0.2"
-tracing-unwrap = "0.9"
+tracing-unwrap = "0.10"
 
 # error handling
 anyhow = "1"
