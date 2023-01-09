@@ -4,4 +4,4 @@ CREATE TABLE IF NOT EXISTS state
     value   BLOB,
 );
 
-INSERT INTO state (key) VALUES ("raft"), ("commited_index");
+INSERT INTO state (key) VALUES ("raft"), ("last_applied");

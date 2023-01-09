@@ -1,7 +1,6 @@
 use std::{collections::HashSet, pin::Pin};
 use std::time::{Duration, Instant};
 
-use boringtun::device::peer::Peer;
 use rand::Rng;
 use sqlx::{prelude::*, query, SqlitePool};
 use serde_json::{from_str, to_string};
@@ -22,14 +21,14 @@ pub struct LeaderState {
 }
 
 pub struct RaftVolatileState {
-    pub commit_index: u64,
-    pub last_applied: u64,
+    
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RaftPersistentState {
     pub current_term: u64,
     pub current_vote: Option<PeerId>,
+    pub last_applied: u64,
     #[serde(skip)]
     log: Log,
 }
@@ -45,7 +44,6 @@ pub struct RaftState {
     pool: SqlitePool,
     pub role: RaftRole,
     pub persistent: RaftPersistentState,
-    pub volatile: RaftVolatileState,
     pub election_timeout: ElectionTimeout,
 }
 
@@ -64,12 +62,12 @@ impl RaftState {
         let persistent = RaftPersistentState::from_db(&pool).await?;
         let key_bytes : Vec<u8> = query("SELECT FROM settings WHERE name='last_leader'").fetch_one(&pool).await?.try_get("value")?;
         let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
+        let last_commited = persistent.get_log_commited();
         Ok(RaftState {
             pool,
             role: RaftRole::Follower(last_known_leader),
             persistent: persistent,
-            volatile: todo!(),
-            election_timeout: todo!(),
+            election_timeout: ElectionTimeout::new(),
         })
     }
 
@@ -77,6 +75,8 @@ impl RaftState {
         self.persistent.store(&self.pool).await?;
         Ok(())
     }
+
+
 }
 
 impl RaftPersistentState {
@@ -98,7 +98,7 @@ impl RaftPersistentState {
     }
 
     pub fn get_log_commited(&self) -> u64 {
-        self.log.get_commited()
+        self.log.commit_index()
     }
 
     pub fn get_log_term(&self) -> u64 {
@@ -110,7 +110,7 @@ impl RaftPersistentState {
     }
 
     pub fn log_append(&mut self, entries: Vec<LogEntry>) {
-        todo!()
+        
     }
 
     pub async fn commit_until(&mut self, leader_commit_index: u64) {
@@ -124,11 +124,10 @@ fn default_sleep() -> Pin<Box<Sleep>> {
     Box::pin(sleep(Duration::from_secs(3600)))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct ElectionTimeout {
-    minimum_timeout: Duration,
-    maximum_timeout: Duration,
-    #[serde(skip,default = "default_sleep")]
+    minimum_timeout_ms: u64,
+    maximum_timeout_ms: u64,
     timer: Pin<Box<Sleep>>,
 }
 
@@ -142,9 +141,15 @@ impl Future for ElectionTimeout {
 
 impl ElectionTimeout {
     pub fn reset(&mut self) {
-        let minimum = self.minimum_timeout.as_millis().try_into().expect_or_log("minimum timeout too big");
-        let maximum = self.maximum_timeout.as_millis().try_into().expect_or_log("maximum timeout too big");
-        let timeout = Duration::from_secs(rand::thread_rng().gen_range(minimum..maximum));
+        let timeout = Duration::from_millis(rand::thread_rng().gen_range(self.minimum_timeout_ms..self.maximum_timeout_ms));
         self.timer.as_mut().reset(Instant::now().checked_add(timeout).ok_or("invalid timeout").unwrap_or_log().into());
+    }
+
+    fn new() -> ElectionTimeout {
+        //TODO: make this configurable
+        let minimum = 1000;
+        let maximum = 10000;
+        let duration = Duration::from_millis(rand::thread_rng().gen_range(minimum..maximum));
+        ElectionTimeout { minimum_timeout_ms: minimum, maximum_timeout_ms: maximum, timer: Box::pin(sleep(duration)) }
     }
 }

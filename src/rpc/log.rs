@@ -9,10 +9,15 @@ use sqlx::query;
 use sqlx::{prelude::*, Arguments};
 use std::collections::BTreeMap;
 use thiserror::Error;
+use getset::{CopyGetters, Setters};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, CopyGetters, Setters)]
 pub struct Log {
-    commited_index: u64,
+    #[getset(get_copy = "pub(crate)", set = "pub(crate)") ]
+    commit_index: u64,
+    #[getset(get_copy = "pub(crate)")]
+    last_applied: u64,
+    #[getset(skip)]
     entries: BTreeMap<u64, LogEntry>,
 }
 
@@ -39,7 +44,7 @@ pub enum LogError {
 impl Log {
     pub async fn from_db(pool: &SqlitePool) -> Result<Log, LogError> {
         let mut connection = pool.acquire().await?;
-        let commited_index = query("SELECT value FROM state WHERE key='commited_index'")
+        let last_applied = query("SELECT value FROM state WHERE key='last_applied'")
             .fetch_one(&mut connection)
             .await?
             .get::<i64, &str>("value")
@@ -47,7 +52,8 @@ impl Log {
             .expect_or_log("Could not convert to u64, probably invalid data in DB");
         let entries = BTreeMap::new();
         Ok(Log {
-            commited_index,
+            last_applied,
+            commit_index: last_applied,
             entries,
         })
     }
@@ -70,10 +76,6 @@ impl Log {
 
     pub fn get_index(&self) -> u64 {
         return self.entries.last_key_value().map(|x| *x.0).unwrap_or(0);
-    }
-
-    pub fn get_commited(&self) -> u64 {
-        self.commited_index
     }
 
     pub fn last_log_term(&self) -> u64 {
