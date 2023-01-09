@@ -1,4 +1,4 @@
-use std::{collections::HashSet, pin::Pin};
+use std::{collections::HashMap, pin::Pin};
 use std::time::{Duration, Instant};
 
 use rand::Rng;
@@ -16,8 +16,8 @@ use super::log::{Log, LogError};
 
 #[derive(Clone)]
 pub struct LeaderState {
-    pub follower_next_index: HashSet<PeerId, u64>,
-    pub follower_match_index: HashSet<PeerId, u64>,
+    pub follower_next_index: HashMap<PeerId, u64>,
+    pub follower_match_index: HashMap<PeerId, u64>,
 }
 
 pub struct RaftVolatileState {
@@ -28,6 +28,7 @@ pub struct RaftVolatileState {
 pub struct RaftPersistentState {
     pub current_term: u64,
     pub current_vote: Option<PeerId>,
+    #[serde(skip)]
     pub last_applied: u64,
     #[serde(skip)]
     log: Log,
@@ -36,7 +37,7 @@ pub struct RaftPersistentState {
 #[derive(Clone)]
 pub enum RaftRole {
     Follower(PeerId),
-    Candidate(HashSet<PeerId, bool>),
+    Candidate(HashMap<PeerId, bool>),
     Leader(LeaderState),
 }
 
@@ -58,15 +59,21 @@ pub enum RaftStateError {
 }
 
 impl RaftState {
-    async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
+    pub async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
         let persistent = RaftPersistentState::from_db(&pool).await?;
-        let key_bytes : Vec<u8> = query("SELECT FROM settings WHERE name='last_leader'").fetch_one(&pool).await?.try_get("value")?;
-        let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
+        let key_bytes : Vec<u8> = query("SELECT value FROM keyvalue WHERE key='last_leader'").fetch_one(&pool).await?.try_get("value")?;
+        let role = if key_bytes.is_empty() {
+            RaftRole::Candidate(HashMap::new())
+        } else {
+            let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
+            RaftRole::Follower(last_known_leader)
+        };
         let last_commited = persistent.get_log_commited();
+
         Ok(RaftState {
             pool,
-            role: RaftRole::Follower(last_known_leader),
-            persistent: persistent,
+            role,
+            persistent,
             election_timeout: ElectionTimeout::new(),
         })
     }
@@ -80,15 +87,15 @@ impl RaftState {
 }
 
 impl RaftPersistentState {
-    async fn from_db(pool: &SqlitePool) -> Result<RaftPersistentState, RaftStateError> {
-        let data = query("SELECT FROM settings WHERE name='raft'").fetch_one(pool).await?;
+    pub async fn from_db(pool: &SqlitePool) -> Result<RaftPersistentState, RaftStateError> {
+        let data = query("SELECT value FROM keyvalue WHERE key='raft'").fetch_one(pool).await?;
         let mut store: RaftPersistentState = from_str(data.try_get("value")?)?;
         store.log = Log::from_db(pool).await?;
-        return Ok(store);
+        Ok(store)
     }
 
-    async fn store(&self, pool: &SqlitePool) -> Result<(), RaftStateError> {
-        query("UPDATE settings WHERE name='raft' SET value=?").bind(to_string(self)?).execute(pool).await?;
+    pub async fn store(&self, pool: &SqlitePool) -> Result<(), RaftStateError> {
+        query("UPDATE keyvalue SET value=? WHERE key='raft'").bind(to_string(self)?).execute(pool).await?;
         self.log.store(pool).await?;
         Ok(())
     }
@@ -152,4 +159,28 @@ impl ElectionTimeout {
         let duration = Duration::from_millis(rand::thread_rng().gen_range(minimum..maximum));
         ElectionTimeout { minimum_timeout_ms: minimum, maximum_timeout_ms: maximum, timer: Box::pin(sleep(duration)) }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::SqlitePool;
+
+    use super::RaftState;
+
+    static MIGRATOR: Migrator = sqlx::migrate!();
+
+    async fn get_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        MIGRATOR.run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_commit_raft_state_persistant() {
+        let pool = get_pool().await;
+        let state = RaftState::new(pool).await.unwrap();
+        state.commit_persistent().await.unwrap();
+    }
+
 }

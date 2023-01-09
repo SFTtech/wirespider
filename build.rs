@@ -46,5 +46,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "wirespider", // We need to specify the bin name manually
         outdir,       // We need to specify where to write to
     )?;
+
+    // sqlx migrations
+    println!("cargo:rerun-if-changed=migrations");
+
     Ok(())
 }

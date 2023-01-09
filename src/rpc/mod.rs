@@ -66,10 +66,14 @@ pub enum ConnectionState {
     IndirectConnection,
 }
 
+/// Permissions of a node
 #[derive(Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub enum Permission {
+    /// Node can participate in mesh and discover peers. A node that should only connect to a gateway node does not have this permission.
     Mesh,
+    /// Node can be elected as a raft leader. Should be online 24/7.
     Server,
+    /// Can send commands to the raft leader that modify the network
     Admin,
 }
 

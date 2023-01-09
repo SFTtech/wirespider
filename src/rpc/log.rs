@@ -44,7 +44,7 @@ pub enum LogError {
 impl Log {
     pub async fn from_db(pool: &SqlitePool) -> Result<Log, LogError> {
         let mut connection = pool.acquire().await?;
-        let last_applied = query("SELECT value FROM state WHERE key='last_applied'")
+        let last_applied = query("SELECT value FROM keyvalue WHERE key='last_applied'")
             .fetch_one(&mut connection)
             .await?
             .get::<i64, &str>("value")
@@ -61,7 +61,7 @@ impl Log {
         let mut transaction = pool.begin().await?;
         query("DELETE FROM log").execute(&mut transaction).await?;
         let insert = pool
-            .prepare("INSERT INTO log (index, term, value) VALUES (?, ?, ?)")
+            .prepare(r#"INSERT INTO log ("index", "term", "value") VALUES (?, ?, ?)"#)
             .await?;
         for entry in &self.entries {
             let mut args = SqliteArguments::default();
