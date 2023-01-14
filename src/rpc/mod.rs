@@ -86,8 +86,15 @@ pub struct ClusterNodeState {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum ClusterNetwork {
-    Wireguard(IpNet),
+pub struct ClusterNetwork {
+    net: IpNet,
+    net_type: ClusterNetworkType
+}
+
+///
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ClusterNetworkType {
+    Wireguard,
     VXLAN { net: IpNet, vni: u32 },
 }
 
