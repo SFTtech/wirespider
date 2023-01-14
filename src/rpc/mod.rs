@@ -18,6 +18,7 @@ use log::LogEntry;
 //pub mod signed;
 //use signed::Signed;
 use tracing_unwrap::ResultExt;
+use uuid::Uuid;
 
 use self::raft_state::RaftRole;
 
@@ -88,14 +89,17 @@ pub struct ClusterNodeState {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClusterNetwork {
     net: IpNet,
-    net_type: ClusterNetworkType
+    net_type: ClusterNetworkType,
+    /// parent defines on top of which network is this network built.
+    /// if it is none, then it is the outermost layer and it is using the internet
+    parent: Option<Uuid>
 }
 
 ///
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClusterNetworkType {
     Wireguard,
-    VXLAN { net: IpNet, vni: u32 },
+    VXLAN { vni: u32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -202,7 +206,11 @@ impl NodeService for Service {
             return (current_term, false);
         }
         // preconditions fulfilled, vote for candidate
-        state.persistent.current_vote.get_or_insert(candidate_id);
+        if term == current_term {
+            state.persistent.current_vote.get_or_insert(candidate_id);
+        } else if term > current_term {
+            // in this case we increase 
+        }
 
         state.persistent.current_term = term;
         state.commit_persistent().await.unwrap_or_log();

@@ -38,12 +38,12 @@ serde_json = "1"
 
 #database
 sqlx = { version = "0.6", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
-base64 = "0.13"
+base64 = "0.21"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = { version = "2.4", features = ["serde"] }
 iprange = "0.6.7"
 eui48 = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 # tracing
 tracing = {version = "0.1", features = ["release_max_level_debug"] }
@@ -59,10 +59,10 @@ thiserror = "1"
 stun_codec = "0.2.0"
 bytecodec = "0.4.15"
 trackable = "1.2.0"
-network-interface = "=0.1.4"
+network-interface = "=0.1.6"
 
 # shutdown
-tokio-graceful-shutdown = "0.11"
+tokio-graceful-shutdown = "0.12"
 
 # retry
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }

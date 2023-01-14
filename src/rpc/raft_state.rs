@@ -28,7 +28,7 @@ pub struct RaftVolatileState {
 pub struct RaftPersistentState {
     pub current_term: u64,
     pub current_vote: Option<PeerId>,
-    #[serde(skip)]
+    #[serde(default)]
     pub last_applied: u64,
     #[serde(skip)]
     log: Log,
@@ -36,11 +36,14 @@ pub struct RaftPersistentState {
 
 #[derive(Clone)]
 pub enum RaftRole {
+    /// this is the follower role without a known leader
+    Initialized, 
     Follower(PeerId),
     Candidate(HashMap<PeerId, bool>),
     Leader(LeaderState),
 }
 
+/// State of the Raft consensus
 pub struct RaftState {
     pool: SqlitePool,
     pub role: RaftRole,
@@ -63,12 +66,11 @@ impl RaftState {
         let persistent = RaftPersistentState::from_db(&pool).await?;
         let key_bytes : Vec<u8> = query("SELECT value FROM keyvalue WHERE key='last_leader'").fetch_one(&pool).await?.try_get("value")?;
         let role = if key_bytes.is_empty() {
-            RaftRole::Candidate(HashMap::new())
+            RaftRole::Initialized
         } else {
             let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
             RaftRole::Follower(last_known_leader)
         };
-        let last_commited = persistent.get_log_commited();
 
         Ok(RaftState {
             pool,
@@ -78,6 +80,7 @@ impl RaftState {
         })
     }
 
+    /// write current state to database
     pub async fn commit_persistent(&self) -> Result<(), RaftStateError> {
         self.persistent.store(&self.pool).await?;
         Ok(())
@@ -124,6 +127,15 @@ impl RaftPersistentState {
         todo!()
     }
 
+    /// update the term to the given term
+    /// if the given term is lower or equal to the current term, nothing happens.
+    /// if the given term is higher the stored term is updated and the current vote is discarded
+    pub async fn update_term(&mut self, new_term: u64) {
+        if self.current_term < new_term {
+            self.current_term = new_term;
+            self.current_vote = None;
+        }
+    }
 
 }
 
