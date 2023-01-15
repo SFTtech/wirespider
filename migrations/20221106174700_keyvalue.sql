@@ -4,4 +4,4 @@ CREATE TABLE IF NOT EXISTS "keyvalue"
     "value"   BLOB
 );
 
-INSERT INTO "keyvalue" ("key", "value") VALUES ('raft', '{"current_term":0}'), ('last_leader', ''), ('last_applied', 0);
+INSERT INTO "keyvalue" ("key", "value") VALUES ('raft', ''), ('last_leader', ''), ('last_applied', 0);

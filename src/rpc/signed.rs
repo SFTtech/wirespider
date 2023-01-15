@@ -58,6 +58,13 @@ impl<'de, T : Serialize + Deserialize<'de>> Signed<T> {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use ed25519_dalek::Signer;
+
+    use crate::rpc::signed::Signed;
+
 #[test]
 fn test_new_signed() {
     let mut csprng = rand::rngs::OsRng{};
@@ -77,4 +84,6 @@ fn test_from_signature() {
     let signed: Signed<String> = Signed::from_serialized(serialized, keypair.public, signature);
     assert_eq!(signed.get_inner().unwrap(), test_string);
     assert_eq!(signed.signature(), &signature);
+}
+
 }

@@ -1,18 +1,49 @@
 use std::{collections::HashMap, pin::Pin};
 use std::time::{Duration, Instant};
 
+use ed25519_dalek::Keypair;
 use rand::Rng;
+use rand::rngs::OsRng;
 use sqlx::{prelude::*, query, SqlitePool};
 use serde_json::{from_str, to_string};
 use futures::Future;
 use tokio::time::{Sleep, sleep};
 use tracing_unwrap::ResultExt;
+use super::ClusterState;
 use super::{PeerId, log::LogEntry};
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
 
-use super::log::{Log, LogError};
+use super::log::{Log, LogError, LogIndex};
 
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Term(u64);
+
+impl Into<u64> for Term {
+    fn into(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for Term {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl TryFrom<i64> for Term {
+    type Error = <u64 as TryFrom<i64>>::Error;
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        Ok(Term(value.try_into()?))
+    }
+}
+
+impl TryInto<i64> for Term {
+    type Error = <u64 as TryInto<i64>>::Error;
+    fn try_into(self) -> Result<i64, Self::Error> {
+        Ok(self.0.try_into()?)
+    }
+}
 
 #[derive(Clone)]
 pub struct LeaderState {
@@ -26,12 +57,14 @@ pub struct RaftVolatileState {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RaftPersistentState {
-    pub current_term: u64,
+    pub current_term: Term,
     pub current_vote: Option<PeerId>,
     #[serde(default)]
-    pub last_applied: u64,
+    pub last_applied: Term,
     #[serde(skip)]
     log: Log,
+    state: ClusterState,
+    pub keypair: Keypair,
 }
 
 #[derive(Clone)]
@@ -86,14 +119,40 @@ impl RaftState {
         Ok(())
     }
 
+    pub fn set_from_raft_snapshot(&mut self, received : ClusterState, last_log_index: LogIndex, last_log_term : Term, leader: PeerId) {
+        self.persistent.state = received;
+        self.persistent.log.reset_to(last_log_term, last_log_index);
+        self.role = RaftRole::Follower(leader);
+    }
 
 }
 
 impl RaftPersistentState {
+    pub fn new() -> RaftPersistentState {
+        let mut rng = OsRng{};
+        let keypair = Keypair::generate(&mut rng);
+        RaftPersistentState {
+            keypair,
+            log: Log::default(),
+            current_term: Term(0),
+            current_vote: None,
+            last_applied: Term(0),
+            state: ClusterState::default()
+        }
+    }
+
     pub async fn from_db(pool: &SqlitePool) -> Result<RaftPersistentState, RaftStateError> {
         let data = query("SELECT value FROM keyvalue WHERE key='raft'").fetch_one(pool).await?;
-        let mut store: RaftPersistentState = from_str(data.try_get("value")?)?;
-        store.log = Log::from_db(pool).await?;
+        let data_str : &str = data.try_get("value")?;
+        let store = if data_str.len() == 0 {
+            let store = RaftPersistentState::new();
+            store.store(pool).await?;
+            store
+        } else {
+            let mut store: RaftPersistentState = from_str(data_str)?;
+            store.log = Log::from_db(pool).await?;
+            store
+        };
         Ok(store)
     }
 
@@ -103,21 +162,21 @@ impl RaftPersistentState {
         Ok(())
     }
 
-    pub fn get_log_index(&self) -> u64 {
+    pub fn get_log_index(&self) -> LogIndex {
         self.log.get_index()
     }
 
     /// this is the last entry that was commited to the state
-    pub fn get_log_commited(&self) -> u64 {
+    pub fn get_log_commited(&self) -> LogIndex {
         self.log.commit_index()
     }
 
     /// this 
-    pub fn get_log_term(&self) -> u64 {
+    pub fn get_log_term(&self) -> Term {
         self.log.last_log_term()
     }
 
-    pub fn log_contains(&self, index: u64, term: u64) -> bool {
+    pub fn log_contains(&self, index: LogIndex, term: Term) -> bool {
         self.log.contains(index, term)
     }
 
@@ -125,14 +184,16 @@ impl RaftPersistentState {
         todo!()
     }
 
-    pub async fn commit_until(&mut self, _leader_commit_index: u64) {
+    pub async fn commit_until(&mut self, _leader_commit_index: LogIndex) {
         todo!()
     }
 
-    /// update the term to the given term
-    /// if the given term is lower or equal to the current term, nothing happens.
-    /// if the given term is higher the stored term is updated and the current vote is discarded
-    pub fn update_term(&mut self, new_term: u64) {
+    /**
+    update the term to the given term
+    if the given term is lower or equal to the current term, nothing happens.
+    if the given term is higher the stored term is updated and the current vote is discarded
+    */
+    pub fn update_term(&mut self, new_term: Term) {
         if self.current_term < new_term {
             self.current_term = new_term;
             self.current_vote = None;

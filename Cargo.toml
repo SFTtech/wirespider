@@ -110,6 +110,6 @@ assets = [
 ]
 
 [patch.crates-io]
-x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0"}
-ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps"}
+x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0", features = ["serde"]}
+ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
 curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5"}
