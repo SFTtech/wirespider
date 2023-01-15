@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use ed25519_dalek::PublicKey;
+use futures::lock::Mutex;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use tarpc::context;
@@ -23,9 +24,6 @@ use uuid::Uuid;
 use self::raft_state::RaftRole;
 
 type PeerId = ed25519_dalek::PublicKey;
-type WireguardKey = x25519_dalek::PublicKey;
-
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Version {
@@ -152,9 +150,26 @@ pub trait NodeService {
     ) -> u64;
 }
 
+/// State when getting chunks of a snapshot
+#[derive(Debug,Clone)]
+struct SnapshotState {
+    data: Vec<u8>,
+    leader: PeerId,
+    last_log_index: u64,
+    last_log_term: u64,
+}
+
+impl PartialEq<SnapshotState> for SnapshotState {
+    fn eq(&self, other: &SnapshotState) -> bool {
+        other.last_log_index == self.last_log_index && 
+        other.last_log_term == self.last_log_term && 
+        other.leader == self.leader
+    }
+}
 
 struct Service {
     raft_state: Arc<RwLock<RaftState>>,
+    snapshot: Arc<Mutex<Option<SnapshotState>>>,
 }
 
 #[tarpc::server]
@@ -199,39 +214,47 @@ impl NodeService for Service {
         last_log_term: u64,
     ) -> (u64, bool) {
         let mut state = self.raft_state.write().await;
-        let (current_term, current_vote, current_log_index, current_log_term) = {
-            (state.persistent.current_term, state.persistent.current_vote, state.persistent.get_log_index(), state.persistent.get_log_term())
-        };
+        state.persistent.update_term(term);
+        let current_term = state.persistent.current_term;
+        let current_vote = state.persistent.current_vote;
+        let current_log_index = state.persistent.get_log_index();
+        let current_log_term = state.persistent.get_log_term();
         if term < current_term || current_vote.is_some() || current_log_index > last_log_index || current_log_term > last_log_term {
             return (current_term, false);
         }
         // preconditions fulfilled, vote for candidate
-        if term == current_term {
-            state.persistent.current_vote.get_or_insert(candidate_id);
-        } else if term > current_term {
-            // in this case we increase 
-        }
+        state.persistent.current_vote = Some(candidate_id);
 
-        state.persistent.current_term = term;
         state.commit_persistent().await.unwrap_or_log();
         (state.persistent.current_term, true)
     }
 
     async fn install_snapshot(
         self, _: context::Context,
-        _term: u64,
-        _leader_id: PeerId,
-        _last_included_index: u64,
-        _last_included_term: u64,
-        _data: Vec<u8>,
-        _last: bool,
+        term: u64,
+        leader: PeerId,
+        last_log_index: u64,
+        last_log_term: u64,
+        data: Vec<u8>,
+        last: bool,
     ) -> u64 {
-        unimplemented!()
+        let new_snapshot_state = SnapshotState {
+            data: Vec::new(),
+            leader,
+            last_log_index,
+            last_log_term
+        };
+        let mut snapshot_state_guard = self.snapshot.lock().await;
+        let snapshot_state = snapshot_state_guard.get_or_insert_with(|| new_snapshot_state.clone());
+        
+        if *snapshot_state != new_snapshot_state {
+            *snapshot_state = new_snapshot_state;
+        }
+        snapshot_state.data.extend_from_slice(&data);
+        if last {
+            let state = self.raft_state.write().await;
+            todo!("do install in state")
+        }
+        term
     }
-}
-
-
-#[test]
-fn test_node_service() {
-
 }

@@ -107,10 +107,12 @@ impl RaftPersistentState {
         self.log.get_index()
     }
 
+    /// this is the last entry that was commited to the state
     pub fn get_log_commited(&self) -> u64 {
         self.log.commit_index()
     }
 
+    /// this 
     pub fn get_log_term(&self) -> u64 {
         self.log.last_log_term()
     }
@@ -119,28 +121,24 @@ impl RaftPersistentState {
         self.log.contains(index, term)
     }
 
-    pub fn log_append(&mut self, entries: Vec<LogEntry>) {
-        
+    pub fn log_append(&mut self, _entries: Vec<LogEntry>) {
+        todo!()
     }
 
-    pub async fn commit_until(&mut self, leader_commit_index: u64) {
+    pub async fn commit_until(&mut self, _leader_commit_index: u64) {
         todo!()
     }
 
     /// update the term to the given term
     /// if the given term is lower or equal to the current term, nothing happens.
     /// if the given term is higher the stored term is updated and the current vote is discarded
-    pub async fn update_term(&mut self, new_term: u64) {
+    pub fn update_term(&mut self, new_term: u64) {
         if self.current_term < new_term {
             self.current_term = new_term;
             self.current_vote = None;
         }
     }
 
-}
-
-fn default_sleep() -> Pin<Box<Sleep>> {
-    Box::pin(sleep(Duration::from_secs(3600)))
 }
 
 #[derive(Debug)]
