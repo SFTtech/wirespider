@@ -13,7 +13,7 @@ use crate::cli::{
     ClientStartCommand, ConnectionOptions,
 };
 use crate::client::event_loop::event_loop;
-use base64::prelude::{BASE64_STANDARD, Engine};
+use base64::prelude::{Engine, BASE64_STANDARD};
 use client_state::ClientState;
 use interface::{DefaultOverlayInterface, DefaultWireguardInterface};
 use peer_identifier::Identifier;
@@ -129,7 +129,9 @@ pub async fn client_manage(manage_opts: ClientManageCommand) -> anyhow::Result<(
                 } else if let Some(pubkey) = command.peer.public_key_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::PublicKey(
-                            BASE64_STANDARD.decode(pubkey).expect("Could not decode base64 of public key"),
+                            BASE64_STANDARD
+                                .decode(pubkey)
+                                .expect("Could not decode base64 of public key"),
                         )),
                     }
                 } else {
@@ -152,7 +154,9 @@ pub async fn client_manage(manage_opts: ClientManageCommand) -> anyhow::Result<(
                 } else if let Some(pubkey) = change.peer.public_key_id {
                     PeerIdentifier {
                         identifier: Some(Identifier::PublicKey(
-                            BASE64_STANDARD.decode(pubkey).expect("Could not decode base64 of public key"),
+                            BASE64_STANDARD
+                                .decode(pubkey)
+                                .expect("Could not decode base64 of public key"),
                         )),
                     }
                 } else {

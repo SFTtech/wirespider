@@ -84,14 +84,19 @@ pub async fn event_loop(
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
             .await
             .expect("Could not read private key");
-        let secret_key_bytes: [u8; 32] = BASE64_STANDARD.decode(private_key_encoded)
+        let secret_key_bytes: [u8; 32] = BASE64_STANDARD
+            .decode(private_key_encoded)
             .expect("Could not decode private key")
             .try_into()
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
         let private_key = StaticSecret::new(OsRng::default());
-        tokio::fs::write(&start_opts.private_key, BASE64_STANDARD.encode(private_key.to_bytes())).await?;
+        tokio::fs::write(
+            &start_opts.private_key,
+            BASE64_STANDARD.encode(private_key.to_bytes()),
+        )
+        .await?;
         private_key
     };
     let pubkey = PublicKey::from(&private_key);
