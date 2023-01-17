@@ -31,7 +31,7 @@ typed-builder = "0.11.0"
 sqlx = { version = "0.6", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.13"
 rand = { version = "0.8", features = ["getrandom"] }
-ipnet = "2.4"
+ipnet = "2.7"
 iprange = "0.6.7"
 eui48 = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -64,7 +64,7 @@ prost-build = { version = "0.11" }
 clap = { version = "4", features = ["derive","env"] }
 clap_complete = "4"
 uuid = "1"
-ipnet = "2.4.0"
+ipnet = "2.7.1"
 tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
 
 
