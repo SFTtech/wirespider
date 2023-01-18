@@ -77,12 +77,10 @@ async fn tonic_service(subsys: SubsystemHandle, bind: SocketAddr) -> anyhow::Res
 
 #[instrument]
 pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
-    let options =
-        SqliteConnectOptions::from_str(&env::var("DATABASE_URL").unwrap())?.create_if_missing(true);
-    let pool = SqlitePool::connect_with(options).await?;
     match opt {
         ServerDatabaseCommand::Migrate(db) => {
-            env::set_var("DATABASE_URL", &db.database_url);
+            let options = SqliteConnectOptions::from_str(&db.database_url)?.create_if_missing(true);
+            let pool = SqlitePool::connect_with(options).await?;
             MIGRATOR.run(&pool).await?;
             Ok(())
         }
@@ -91,7 +89,9 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
             addresses,
             db,
         }) => {
-            env::set_var("DATABASE_URL", &db.database_url);
+            SqliteConnectOptions::from_str(&db.database_url)?.create_if_missing(true);
+            let options = SqliteConnectOptions::from_str(&db.database_url)?.create_if_missing(true);
+            let pool = SqlitePool::connect_with(options).await?;
             // find networks for addresses
             let mut networkid_map: HashMap<IpNet, i64> = HashMap::new();
             let mut addr_network_map: HashMap<IpNet, IpNet> = HashMap::new();
@@ -139,7 +139,9 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
             Ok(())
         }
         ServerDatabaseCommand::Network(NetworkCommand::Create(x)) => {
-            env::set_var("DATABASE_URL", &x.db.database_url);
+            let options =
+                SqliteConnectOptions::from_str(&x.db.database_url)?.create_if_missing(true);
+            let pool = SqlitePool::connect_with(options).await?;
             let network_type = match x.network_type {
                 NetworkType::Vxlan => "vxlan",
                 NetworkType::Wireguard => "wireguard",
@@ -163,7 +165,9 @@ pub async fn server_manage(opt: ServerDatabaseCommand) -> anyhow::Result<()> {
             Ok(())
         }
         ServerDatabaseCommand::Network(NetworkCommand::Delete(x)) => {
-            env::set_var("DATABASE_URL", &x.db.database_url);
+            let options =
+                SqliteConnectOptions::from_str(&x.db.database_url)?.create_if_missing(true);
+            let pool = SqlitePool::connect_with(options).await?;
             let query = sqlx::query(
                 r#"
                             DELETE FROM networks WHERE network=? AND ipv6=?
