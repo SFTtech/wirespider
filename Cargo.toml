@@ -1,6 +1,6 @@
 [package]
 name = "wirespider"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Linus Karl <linus@lotz.li>"]
 license = "GPL-3"
 edition = "2021"
