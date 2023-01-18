@@ -1,16 +1,16 @@
 Package: wirespider
-Version: 0.5.0
+Version: 0.5.1
 Architecture: amd64
 Maintainer: Linus Karl <linus@lotz.li>
-Installed-Size: 10683
-Depends: libc6 (>= 2.34), wireguard-tools, iproute2
+Installed-Size: 10687
+Depends: iproute2, wireguard-tools, libc6 (>= 2.34)
 Priority: optional
 Section: net
-Filename: pool/main/w/wirespider/wirespider_0.5.0_amd64.deb
-Size: 3300840
-SHA256: 1422df36a695d17e60377791c8f53a086e1a17addf9d9d1efb33b48c207e6110
-SHA1: d62c658bd5ce76c077b014051422c169c91f8277
-MD5sum: 10383eca3c0cc8e818a3fff2ff89de91
+Filename: pool/main/w/wirespider/wirespider_0.5.1_amd64.deb
+Size: 3302828
+SHA256: bd8932ffa3810348bafeb486f65b5da4d95ecf86b92968a653a55408554733ca
+SHA1: 519e116f31cb00b45c6b5d2299dec2001e1776ee
+MD5sum: b7d5699702187c908daa23246d4261a9
 Description: Wirespider distributes wireguard tunnel configurations and routes
  # Wirespider
  .
