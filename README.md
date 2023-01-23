@@ -35,7 +35,28 @@ sudo cp systemd/wirespider/wg0 /etc/wirespider/wg0-example
 sudo adduser --system --group --home /var/lib/wirespider wirespider
 ```
 
-## Running wirespider
+## How to run the wirespider server
+This must be run as root or just prefix all commands (even those starting with sudo) with sudo
+```
+# create runtime directory
+mkdir -p /var/lib/wirespider/
+chown -R wirespider:wirespider /var/lib/wirespider/
+sudo -u wirespider wirespider database migrate -d sqlite:/var/lib/wirespider/config.sqlite
+# create a ip network for the clients
+sudo -u wirespider wirespider database create-network -d sqlite:/var/lib/wirespider/config.sqlite 10.1.2.0/24
+# add admin with ip in this new network
+# the command will return a token you can use with wirespider start-client and wirespider send-command
+sudo -u wirespider wirespider database create-admin -d sqlite:/var/lib/wirespider/config.sqlite admin 10.1.2.1/24
+
+
+# enable auto start and start the server
+systemctl enable --now wirespider-server.service
+```
+
+The admin can now use the `wirespider send-command` commands to create other peers and routes
+
+
+## Running wirespider client
 
 To run the client:
 ```
@@ -46,23 +67,6 @@ sudo nano /etc/wirespider/wg0
 # use the same device name
 sudo systemctl enable --now wirespider-client@wg0.service
 ```
-
-## How to run the server
-```
-# create database
-wirespider database migrate -d sqlite:/var/lib/wirespider/config.sqlite
-# create a ip network for the clients
-wirespider database create-network -d sqlite:/var/lib/wirespider/config.sqlite 10.1.2.0/24
-# add admin with ip in this new network
-# the command will return a token you can use with wirespider start-client and wirespider send-command
-wirespider database create-admin -d sqlite:/var/lib/wirespider/config.sqlite admin 10.1.2.1/24
-
-
-# enable auto start and start the server
-sudo systemctl enable --now wirespider-server.service
-```
-
-The admin can now use the `wirespider send-command` commands to create other peers and routes
 
 ### Contact
 
