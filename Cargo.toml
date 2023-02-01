@@ -50,7 +50,7 @@ thiserror = "1"
 stun_codec = "0.2.0"
 bytecodec = "0.4.15"
 trackable = "1.2.0"
-network-interface = "=0.1.4"
+network-interface = "=0.1.6"
 
 # shutdown
 tokio-graceful-shutdown = "0.12"
