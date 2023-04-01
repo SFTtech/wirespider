@@ -354,27 +354,12 @@ dependencies = [
 
 [[package]]
 name = "crc"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49fc9a695bca7f35f5f4c15cddc84415f66a74ea78eef08e90c5024f2b540e23"
-dependencies = [
- "crc-catalog 1.1.1",
-]
-
-[[package]]
-name = "crc"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53757d12b596c16c78b83458d732a5d1a17ab3f53f2f7412f6fb57cc8a140ab3"
 dependencies = [
- "crc-catalog 2.2.0",
+ "crc-catalog",
 ]
-
-[[package]]
-name = "crc-catalog"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccaeedb56da03b09f598226e25e80088cb4cd25f316e6e4df7d695f0feeb1403"
 
 [[package]]
 name = "crc-catalog"
@@ -1739,7 +1724,7 @@ dependencies = [
  "bitflags",
  "byteorder",
  "bytes",
- "crc 3.0.0",
+ "crc",
  "crossbeam-queue",
  "dotenvy",
  "either",
@@ -1823,13 +1808,13 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "stun_codec"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f1df6c4e592afc1ffed8f4bc50ab9f4d70cfccb42829662b7d276247cbef3b1"
+checksum = "6e53e1db3dc8aa7e6507bc61fd91f60e40a647f074af1e4fe200dc134fe7fa2f"
 dependencies = [
  "bytecodec",
  "byteorder",
- "crc 2.1.0",
+ "crc",
  "hmac-sha1",
  "md5",
  "trackable 1.2.0",
