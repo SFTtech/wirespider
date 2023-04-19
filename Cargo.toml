@@ -16,8 +16,8 @@ getset = "0.1.2"
 
 #wireguard
 wireguard-uapi = "2.0.3"
-boringtun = "0.5"
-x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0", features = ["serde"]}
+boringtun = { git = "https://github.com/cloudflare/boringtun.git" }
+x25519-dalek = { version = "=2.0.0-rc.2", features = ["serde"]}
 ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
 curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5", features = ["serde"]}
 
@@ -110,6 +110,6 @@ assets = [
 ]
 
 [patch.crates-io]
-x25519-dalek = { git= "https://github.com/dalek-cryptography/x25519-dalek", branch="release/2.0", features = ["serde"]}
+# x25519-dalek = { version = "=2.0.0-rc.2"}
 ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
 curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5"}

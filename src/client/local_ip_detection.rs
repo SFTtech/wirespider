@@ -6,6 +6,7 @@ use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing::instrument;
 use tracing_unwrap::ResultExt;
+use std::pin::pin;
 
 use boringtun::noise::Tunn;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -46,7 +47,7 @@ async fn check_ip(
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.connect(dest).await?;
     let mut buffer = [0u8; 148]; // size from boringtun::noise::HANDSHAKE_INIT_SZ
-    let mut tun = Tunn::new(priv_key, pub_key, None, None, 1, None).unwrap_or_log();
+    let mut tun = pin!(Tunn::new(priv_key, pub_key, None, None, 1, None).unwrap_or_log());
     match tun.format_handshake_initiation(&mut buffer, false) {
         boringtun::noise::TunnResult::Err(_) => return Ok(None),
         boringtun::noise::TunnResult::WriteToNetwork(buf) => {

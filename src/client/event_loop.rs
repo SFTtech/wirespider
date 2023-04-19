@@ -90,7 +90,7 @@ pub async fn event_loop(
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = StaticSecret::new(OsRng::default());
+        let private_key = StaticSecret::random_from_rng(OsRng::default());
         tokio::fs::write(&start_opts.private_key, BASE64_STANDARD.encode(private_key.to_bytes())).await?;
         private_key
     };

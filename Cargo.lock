@@ -253,8 +253,7 @@ dependencies = [
 [[package]]
 name = "boringtun"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51d23af4567b268583ccc30a983a0f937fb5fc05e71e9de96012a72ad10d1a45"
+source = "git+https://github.com/cloudflare/boringtun.git#878385f171d60effac4ad1a9d4dee41e777528b8"
 dependencies = [
  "aead",
  "base64 0.13.1",
@@ -500,7 +499,6 @@ dependencies = [
  "byteorder",
  "digest 0.9.0",
  "rand_core 0.5.1",
- "serde",
  "subtle",
  "zeroize",
 ]
@@ -513,6 +511,21 @@ dependencies = [
  "byteorder",
  "digest 0.10.6",
  "rand_core 0.6.4",
+ "serde",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek"
+version = "4.0.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03d928d978dbec61a1167414f5ec534f24bea0d7a0d24dd9b6233d3d8223e585"
+dependencies = [
+ "cfg-if",
+ "fiat-crypto",
+ "packed_simd_2",
+ "platforms",
  "serde",
  "subtle",
  "zeroize",
@@ -706,6 +719,12 @@ checksum = "e51093e27b0797c359783294ca4f0a911c270184cb10f85783b118614a1501be"
 dependencies = [
  "instant",
 ]
+
+[[package]]
+name = "fiat-crypto"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e825f6987101665dea6ec934c09ec6d721de7bc1bf92248e1d5810c8cd636b77"
 
 [[package]]
 name = "fixedbitset"
@@ -1189,6 +1208,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3304a64d199bb964be99741b7a14d26972741915b3649639149b2479bb46f4b5"
 
 [[package]]
+name = "libm"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
+
+[[package]]
 name = "libsqlite3-sys"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1241,15 +1266,6 @@ name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
-
-[[package]]
-name = "memoffset"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "miette"
@@ -1329,14 +1345,14 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.24.3"
+version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa52e972a9a719cecb6864fb88568781eb706bac2cd1d4f04a648542dbf78069"
+checksum = "f346ff70e7dbfd675fe90590b92d59ef2de15a8779ae305ebcbfd3f0caf59be4"
 dependencies = [
+ "autocfg",
  "bitflags",
  "cfg-if",
  "libc",
- "memoffset",
 ]
 
 [[package]]
@@ -1435,6 +1451,16 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "packed_simd_2"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1914cd452d8fccd6f9db48147b29fd4ae05bea9dc5d9ad578509f72415de282"
+dependencies = [
+ "cfg-if",
+ "libm",
+]
 
 [[package]]
 name = "parking_lot"
@@ -1543,6 +1569,12 @@ name = "pkg-config"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
+
+[[package]]
+name = "platforms"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3d7ddaed09e0eb771a79ab0fd64609ba0afb0a8366421957936ad14cbd13630"
 
 [[package]]
 name = "poly1305"
@@ -3006,10 +3038,11 @@ dependencies = [
 
 [[package]]
 name = "x25519-dalek"
-version = "2.0.0-pre.1"
-source = "git+https://github.com/dalek-cryptography/x25519-dalek?branch=release/2.0#3fc0108d7dee1c434158169f5a64b1f08e7bc12d"
+version = "2.0.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabd6e16dd08033932fc3265ad4510cc2eab24656058a6dcb107ffe274abcc95"
 dependencies = [
- "curve25519-dalek 3.2.0",
+ "curve25519-dalek 4.0.0-rc.2",
  "rand_core 0.6.4",
  "serde",
  "zeroize",
