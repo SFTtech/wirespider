@@ -104,10 +104,10 @@ pub async fn event_loop(
     let local_ips = NetworkInterface::show()
         .unwrap_or_log()
         .into_iter()
-        .filter(|x| x.addr.is_some())
-        .map(|x| match x.addr.unwrap() {
-            network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
-            network_interface::Addr::V6(x) => IpAddr::from(x.ip).into(),
+        .flat_map(|x| x.addr.into_iter())
+        .map(|x| match x {
+            network_interface::Addr::V4(addr) => IpAddr::from(addr.ip).into(),
+            network_interface::Addr::V6(addr) => IpAddr::from(addr.ip).into(),
         })
         .collect();
     debug!("local ips: {local_ips:?}");
