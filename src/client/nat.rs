@@ -268,13 +268,14 @@ async fn get_nat_filtering_behaviour(
     Ok(NatFiltering::AddressAndPortDependent)
 }
 
+#[cfg(feature = "network-test")]
 #[tokio::test]
 async fn test_nat_behaviour() {
     let result = get_nat_type(
-        "stun.stunprotocol.org:3478",
+        "stunserver.stunprotocol.org:3478",
         NonZeroU16::new(51820).unwrap(),
     )
     .await
-    .unwrap();
+    .expect("Could not get NAT type");
     println!("Got address: {:?}, Nat type: {:?}", result.0, result.1);
 }

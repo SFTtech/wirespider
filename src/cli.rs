@@ -197,7 +197,7 @@ pub struct ClientStartCommand {
     #[arg(
         long,
         env = "WS_STUN_HOST",
-        default_value = "stun.stunprotocol.org:3478",
+        default_value = "stunserver.stunprotocol.org:3478",
         help = "Stun server to use, must support RFC 5780"
     )]
     pub stun_host: String,
