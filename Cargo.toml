@@ -77,6 +77,8 @@ ipnet = "2.4.0"
 serde = "1"
 tonic = { version = "0.8", features = ["tls", "tls-webpki-roots"]}
 
+[features]
+network-test = []
 
 [package.metadata.deb]
 maintainer-scripts = "debian/"
