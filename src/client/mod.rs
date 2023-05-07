@@ -31,6 +31,7 @@ use tracing_subscriber::Registry;
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::*;
+use lazy_static::lazy_static;
 
 lazy_static! {
     static ref CLIENT_STATE: ClientState = ClientState::default();
