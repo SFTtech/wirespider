@@ -1,6 +1,6 @@
 use super::interface_trait::OverlayManagementInterface;
 
-use eui48::MacAddress;
+use advmac::MacAddr6;
 use ipnet::IpNet;
 use std::{net::IpAddr, process::Command};
 use thiserror::Error;
@@ -29,7 +29,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         listen_device: &str,
         listen_addr: &IpAddr,
         addresses: Vec<IpNet>,
-        mac_addr: MacAddress,
+        mac_addr: MacAddr6,
     ) -> Result<Self, Self::Error> {
         // create interface
         let args = &[
@@ -37,7 +37,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "add",
             &device_name,
             "address",
-            &mac_addr.to_hex_string(),
+            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
             "mtu",
             "1378",
             "type",
@@ -80,7 +80,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
 
     fn set_peer(
         &self,
-        mac_addr: MacAddress,
+        mac_addr: MacAddr6,
         net: IpNet,
         remote: IpAddr,
     ) -> Result<(), Self::Error> {
@@ -88,7 +88,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         let args = &[
             "fdb",
             "del",
-            &mac_addr.to_hex_string(),
+            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -102,7 +102,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         let args = &[
             "fdb",
             "add",
-            &mac_addr.to_hex_string(),
+            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
             "dev",
             &self.device_name,
             "self",
@@ -143,7 +143,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "replace",
             &net.addr().to_string(),
             "lladdr",
-            &mac_addr.to_hex_string(),
+            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -156,13 +156,13 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         Ok(())
     }
 
-    fn remove_peer(&self, mac_addr: eui48::MacAddress) -> Result<(), Self::Error> {
+    fn remove_peer(&self, mac_addr: MacAddr6) -> Result<(), Self::Error> {
         // TODO remove broadcast entry
         let output = Command::new("bridge")
             .args([
                 "fdb",
                 "del",
-                &mac_addr.to_hex_string(),
+                &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
                 "dev",
                 &self.device_name,
             ])

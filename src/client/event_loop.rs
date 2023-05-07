@@ -2,9 +2,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
+use advmac::MacAddr6;
 use backoff::future::retry;
 use base64::prelude::{Engine, BASE64_STANDARD};
-use eui48::MacAddress;
 use ipnet::IpNet;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
@@ -160,7 +160,7 @@ pub async fn event_loop(
     let mut mac_bytes = Vec::with_capacity(6);
     mac_bytes.push(0xaa);
     mac_bytes.extend_from_slice(&PublicKey::from(&private_key).as_bytes().as_ref()[0..5]);
-    let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+    let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
     let overlay_interface = DefaultOverlayInterface::create_overlay_device(
         format!("{}-vxlan", device_name),
         &device_name,
@@ -214,7 +214,7 @@ pub async fn event_loop(
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&peer_pubkey.as_bytes()[0..5]);
-                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap();
+                                let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
                                 let peer_port : u16 = peer.local_port.try_into().expect("Invalid port");
 
                                 let allowed_ips: Vec<IpNet> = peer
@@ -301,7 +301,7 @@ pub async fn event_loop(
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
-                                let mac_addr = MacAddress::from_bytes(&mac_bytes).unwrap_or_log();
+                                let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
                                 overlay_interface.remove_peer(mac_addr).unwrap_or_log();
                                 interface.lock().await.remove_peer(peer_pubkey).unwrap();
                             }
