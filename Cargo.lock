@@ -1890,7 +1890,7 @@ dependencies = [
  "crc",
  "hmac-sha1",
  "md5",
- "trackable 1.2.0",
+ "trackable 1.3.0",
 ]
 
 [[package]]
@@ -2260,15 +2260,15 @@ version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b98abb9e7300b9ac902cc04920945a874c1973e08c310627cc4458c04b70dd32"
 dependencies = [
- "trackable 1.2.0",
+ "trackable 1.3.0",
  "trackable_derive",
 ]
 
 [[package]]
 name = "trackable"
-version = "1.2.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "017e2a1a93718e4e8386d037cfb8add78f1d690467f4350fb582f55af1203167"
+checksum = "b15bd114abb99ef8cee977e517c8f37aee63f184f2d08e3e6ceca092373369ae"
 dependencies = [
  "trackable_derive",
 ]
@@ -2757,7 +2757,7 @@ dependencies = [
  "tracing-error",
  "tracing-subscriber",
  "tracing-unwrap",
- "trackable 1.2.0",
+ "trackable 1.3.0",
  "typed-builder",
  "uuid",
  "wireguard-uapi",
