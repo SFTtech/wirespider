@@ -1218,9 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "network-interface"
-version = "0.1.6"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0bc4480c4518eb8b2599ae2dd7a97b231178ad8fb9a3e6a854fd48a5f54e95c"
+checksum = "296ae2183dab440e352740b1fcf0589d8058afa40bc29fd163227ddb01fbf539"
 dependencies = [
  "cc",
  "libc",
@@ -2314,7 +2314,7 @@ checksum = "6dba2e999a7ccbeb42ede7c9824fc9d4660794e5bcd456e5d60ac17baad6e083"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.15",
+ "syn 2.0.28",
 ]
 
 [[package]]
