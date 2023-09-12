@@ -28,7 +28,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 typed-builder = "0.16.0"
 
 #database
-sqlx = { version = "0.6", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
+sqlx = { version = "0.7", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.21"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.8"
