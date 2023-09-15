@@ -1,4 +1,4 @@
-use eui48::MacAddress;
+use macaddr::MacAddr6;
 use ipnet::IpNet;
 use std::{
     error::Error,
@@ -39,9 +39,9 @@ pub trait OverlayManagementInterface: Sized {
         listen_device: &str,
         listen_addr: &IpAddr,
         addresses: Vec<IpNet>,
-        mac_addr: MacAddress,
+        mac_addr: MacAddr6,
     ) -> Result<Self, Self::Error>;
-    fn set_peer(&self, mac_addr: MacAddress, net: IpNet, remote: IpAddr)
+    fn set_peer(&self, mac_addr: MacAddr6, net: IpNet, remote: IpAddr)
         -> Result<(), Self::Error>;
-    fn remove_peer(&self, mac_addr: MacAddress) -> Result<(), Self::Error>;
+    fn remove_peer(&self, mac_addr: MacAddr6) -> Result<(), Self::Error>;
 }
