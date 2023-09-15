@@ -796,7 +796,7 @@ impl Wirespider for WirespiderServerState {
                 .bind(&request.name)
                 .bind(token)
                 .bind(request.permissions)
-                .execute(&mut transaction)
+                .execute(&mut *transaction)
                 .await
                 .into_status()?
                 .last_insert_rowid();
@@ -806,7 +806,7 @@ impl Wirespider for WirespiderServerState {
                 .bind(peerid)
                 .bind(networkid_map[&addr_network_map[net]])
                 .bind(net.addr().to_string())
-                .execute(&mut transaction)
+                .execute(&mut *transaction)
                 .await
                 .into_status()?;
         }
