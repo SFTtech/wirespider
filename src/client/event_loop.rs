@@ -4,8 +4,8 @@ use std::{net::SocketAddr, time::Duration};
 
 use backoff::future::retry;
 use base64::prelude::{Engine, BASE64_STANDARD};
-use macaddr::MacAddr6;
 use ipnet::IpNet;
+use macaddr::MacAddr6;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
 use rand::{rngs::OsRng, Rng};
@@ -109,11 +109,12 @@ pub async fn event_loop(
     let local_ips = NetworkInterface::show()
         .unwrap_or_log()
         .into_iter()
-        .flat_map(|x| x.addr.into_iter().map(|x|
-                match x {
-                    network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
-                    network_interface::Addr::V6(x) => IpAddr::from(x.ip).into(),
-                }))
+        .flat_map(|x| {
+            x.addr.into_iter().map(|x| match x {
+                network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
+                network_interface::Addr::V6(x) => IpAddr::from(x.ip).into(),
+            })
+        })
         .collect();
     debug!("local ips: {local_ips:?}");
     let address_reply = client

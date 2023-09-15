@@ -1,7 +1,7 @@
 use super::interface_trait::OverlayManagementInterface;
 
-use macaddr::MacAddr6;
 use ipnet::IpNet;
+use macaddr::MacAddr6;
 use std::{net::IpAddr, process::Command};
 use thiserror::Error;
 use tracing::debug;
@@ -78,12 +78,7 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         Ok(OverlayCommandLineInterface { device_name })
     }
 
-    fn set_peer(
-        &self,
-        mac_addr: MacAddr6,
-        net: IpNet,
-        remote: IpAddr,
-    ) -> Result<(), Self::Error> {
+    fn set_peer(&self, mac_addr: MacAddr6, net: IpNet, remote: IpAddr) -> Result<(), Self::Error> {
         // delete existing entry
         let args = &[
             "fdb",

@@ -11,7 +11,6 @@ use wirespider::protocol::NatType;
 #[macro_use]
 extern crate lazy_static;
 
-
 impl From<cli::NatType> for NatType {
     fn from(other: cli::NatType) -> NatType {
         match other {
