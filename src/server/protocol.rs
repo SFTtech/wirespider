@@ -464,8 +464,8 @@ impl Wirespider for WirespiderServerState {
         let mut updated = false;
         let mut eventtype = EventType::Changed;
 
-        let requested_nat_type = NatType::from_i32(request.get_ref().nat_type)
-            .ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
+        let requested_nat_type = NatType::try_from(request.get_ref().nat_type)
+            .map_err(|_| Status::invalid_argument("Invalid NatType"))?;
         let requested_node_flags = request
             .get_ref()
             .node_flags
@@ -580,10 +580,10 @@ impl Wirespider for WirespiderServerState {
             }
         }
 
-        let old_nat_type = NatType::from_i32(peer_query.get::<i32, &str>("nat_type"));
+        let old_nat_type = NatType::try_from(peer_query.get::<i32, &str>("nat_type"));
         let new_nat_type = request.get_ref().nat_type;
 
-        if let Some(old_nat_type) = old_nat_type {
+        if let Ok(old_nat_type) = old_nat_type {
             if new_nat_type != old_nat_type as i32 {
                 updated = true;
                 //update database

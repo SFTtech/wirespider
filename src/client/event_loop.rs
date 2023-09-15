@@ -207,7 +207,7 @@ pub async fn event_loop(
                     };
                     debug!("Event: {:?}", &event);
                     CLIENT_STATE.update(&event).await;
-                    let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
+                    let event_type = EventType::try_from(event.r#type).expect("Invalid event type");
                     match event.target {
                         Some(event::Target::Peer(peer)) => match event_type {
                             EventType::New | EventType::Changed => {
@@ -232,7 +232,7 @@ pub async fn event_loop(
                                     relay: false,
                                 });
                                 let peer_nat_type =
-                                    NatType::from_i32(peer.nat_type).unwrap_or(NatType::NoNat);
+                                    NatType::try_from(peer.nat_type).unwrap_or(NatType::NoNat);
                                 let keep_alive = if peer_flags.monitor {
                                     Some(start_opts.keep_alive)
                                 } else {

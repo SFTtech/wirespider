@@ -15,7 +15,7 @@ impl ClientState {
     pub async fn update(&self, event: &Event) {
         let mut peer_data = self.peers.write().await;
         let target = event.target.clone();
-        let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
+        let event_type = EventType::try_from(event.r#type).expect("Invalid event type");
         if let Some(event::Target::Peer(peer)) = target {
             match event_type {
                 EventType::New => {
