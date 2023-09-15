@@ -11,8 +11,6 @@ use wirespider::protocol::NatType;
 #[macro_use]
 extern crate lazy_static;
 
-#[macro_use]
-extern crate trackable;
 
 impl From<cli::NatType> for NatType {
     fn from(other: cli::NatType) -> NatType {
