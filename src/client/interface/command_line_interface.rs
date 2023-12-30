@@ -37,7 +37,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "add",
             &device_name,
             "address",
-            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "mtu",
             "1378",
             "type",
@@ -78,17 +80,14 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         Ok(OverlayCommandLineInterface { device_name })
     }
 
-    fn set_peer(
-        &self,
-        mac_addr: MacAddr6,
-        net: IpNet,
-        remote: IpAddr,
-    ) -> Result<(), Self::Error> {
+    fn set_peer(&self, mac_addr: MacAddr6, net: IpNet, remote: IpAddr) -> Result<(), Self::Error> {
         // delete existing entry
         let args = &[
             "fdb",
             "del",
-            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -102,7 +101,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         let args = &[
             "fdb",
             "add",
-            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
             "self",
@@ -143,7 +144,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "replace",
             &net.addr().to_string(),
             "lladdr",
-            &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -162,7 +165,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             .args([
                 "fdb",
                 "del",
-                &mac_addr.format_string(advmac::MacAddrFormat::ColonNotation).to_lowercase(),
+                &mac_addr
+                    .format_string(advmac::MacAddrFormat::ColonNotation)
+                    .to_lowercase(),
                 "dev",
                 &self.device_name,
             ])

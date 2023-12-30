@@ -11,7 +11,7 @@ use network_interface::NetworkInterfaceConfig;
 use rand::{rngs::OsRng, Rng};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, warn};
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::{
@@ -84,14 +84,19 @@ pub async fn event_loop(
         let private_key_encoded = tokio::fs::read_to_string(start_opts.private_key)
             .await
             .expect("Could not read private key");
-        let secret_key_bytes: [u8; 32] = BASE64_STANDARD.decode(private_key_encoded)
+        let secret_key_bytes: [u8; 32] = BASE64_STANDARD
+            .decode(private_key_encoded)
             .expect("Could not decode private key")
             .try_into()
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
         let private_key = StaticSecret::random_from_rng(OsRng::default());
-        tokio::fs::write(&start_opts.private_key, BASE64_STANDARD.encode(private_key.to_bytes())).await?;
+        tokio::fs::write(
+            &start_opts.private_key,
+            BASE64_STANDARD.encode(private_key.to_bytes()),
+        )
+        .await?;
         private_key
     };
     let pubkey = PublicKey::from(&private_key);
@@ -146,9 +151,9 @@ pub async fn event_loop(
     let monitor_interface = interface.clone();
     let monitor_client = client.clone();
     let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
-    subsys.start("monitor", move |subsys| {
+    subsys.start(SubsystemBuilder::new("monitor", move |subsys| {
         monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
-    });
+    }));
 
     let overlay_address_list = address_reply
         .overlay_ips
@@ -202,7 +207,7 @@ pub async fn event_loop(
                     };
                     debug!("Event: {:?}", &event);
                     CLIENT_STATE.update(&event).await;
-                    let event_type = EventType::from_i32(event.r#type).expect("Invalid event type");
+                    let event_type = EventType::try_from(event.r#type).expect("Invalid event type");
                     match event.target {
                         Some(event::Target::Peer(peer)) => match event_type {
                             EventType::New | EventType::Changed => {
@@ -227,7 +232,7 @@ pub async fn event_loop(
                                     relay: false,
                                 });
                                 let peer_nat_type =
-                                    NatType::from_i32(peer.nat_type).unwrap_or(NatType::NoNat);
+                                    NatType::try_from(peer.nat_type).unwrap_or(NatType::NoNat);
                                 let keep_alive = if peer_flags.monitor {
                                     Some(start_opts.keep_alive)
                                 } else {

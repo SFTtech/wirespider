@@ -3,7 +3,7 @@ use std::{
     num::NonZeroU16,
 };
 
-use clap::{ValueEnum, ArgGroup, Args, Parser, Subcommand, ValueHint};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum, ValueHint};
 use clap_complete::Shell;
 use ipnet::IpNet;
 use tonic::transport::Uri;
@@ -157,12 +157,7 @@ pub struct ConnectionOptions {
     pub endpoint: Uri,
 
     /// Token for authentication
-    #[arg(
-        short,
-        long,
-        env = "WS_TOKEN",
-        help = "Token used for authentication"
-    )]
+    #[arg(short, long, env = "WS_TOKEN", help = "Token used for authentication")]
     pub token: Uuid,
 }
 

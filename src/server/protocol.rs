@@ -464,8 +464,8 @@ impl Wirespider for WirespiderServerState {
         let mut updated = false;
         let mut eventtype = EventType::Changed;
 
-        let requested_nat_type = NatType::from_i32(request.get_ref().nat_type)
-            .ok_or_else(|| Status::invalid_argument("Invalid NatType"))?;
+        let requested_nat_type = NatType::try_from(request.get_ref().nat_type)
+            .or_else(|_| Err(Status::invalid_argument("Invalid NatType")))?;
         let requested_node_flags = request
             .get_ref()
             .node_flags
@@ -478,7 +478,9 @@ impl Wirespider for WirespiderServerState {
             return Err(Status::permission_denied("Not allowed to relay"));
         }
 
-        if auth_peer.nat_type != <wirespider::protocol::NatType as Into<i32>>::into(requested_nat_type) {
+        if auth_peer.nat_type
+            != <wirespider::protocol::NatType as Into<i32>>::into(requested_nat_type)
+        {
             updated = true;
             auth_peer.nat_type = requested_nat_type.into();
         }
@@ -580,10 +582,10 @@ impl Wirespider for WirespiderServerState {
             }
         }
 
-        let old_nat_type = NatType::from_i32(peer_query.get::<i32, &str>("nat_type"));
+        let old_nat_type = NatType::try_from(peer_query.get::<i32, &str>("nat_type"));
         let new_nat_type = request.get_ref().nat_type;
 
-        if let Some(old_nat_type) = old_nat_type {
+        if let Ok(old_nat_type) = old_nat_type {
             if new_nat_type != old_nat_type as i32 {
                 updated = true;
                 //update database
@@ -796,7 +798,7 @@ impl Wirespider for WirespiderServerState {
                 .bind(&request.name)
                 .bind(token)
                 .bind(request.permissions)
-                .execute(&mut transaction)
+                .execute(&mut *transaction)
                 .await
                 .into_status()?
                 .last_insert_rowid();
@@ -806,7 +808,7 @@ impl Wirespider for WirespiderServerState {
                 .bind(peerid)
                 .bind(networkid_map[&addr_network_map[net]])
                 .bind(net.addr().to_string())
-                .execute(&mut transaction)
+                .execute(&mut *transaction)
                 .await
                 .into_status()?;
         }

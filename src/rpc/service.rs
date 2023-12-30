@@ -1,13 +1,16 @@
 use std::sync::Arc;
 
 use tarpc::context;
-use tokio::sync::{RwLock, Mutex};
+use tokio::sync::{Mutex, RwLock};
 use tracing_unwrap::ResultExt;
 
 use crate::{rpc::ClusterState, Version};
 
-use super::{PeerId, raft_state::{RaftState, Term, RaftRole}, WIRESPIDER_VERSION, log::{LogEntry, LogIndex}};
-
+use super::{
+    log::{LogEntry, LogIndex},
+    raft_state::{RaftRole, RaftState, Term},
+    PeerId, WIRESPIDER_VERSION,
+};
 
 #[tarpc::service]
 pub trait NodeService {
@@ -62,7 +65,7 @@ pub trait NodeService {
 }
 
 /// State when getting chunks of a snapshot
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 struct SnapshotState {
     data: Vec<u8>,
     leader: PeerId,
@@ -70,13 +73,12 @@ struct SnapshotState {
     last_log_term: Term,
 }
 
-
 /// This comparison
 impl PartialEq<SnapshotState> for SnapshotState {
     fn eq(&self, other: &SnapshotState) -> bool {
-        other.last_log_index == self.last_log_index && 
-        other.last_log_term == self.last_log_term && 
-        other.leader == self.leader
+        other.last_log_index == self.last_log_index
+            && other.last_log_term == self.last_log_term
+            && other.leader == self.leader
     }
 }
 
@@ -92,7 +94,8 @@ impl NodeService for Service {
     }
 
     async fn append_entries(
-        self, _: context::Context,
+        self,
+        _: context::Context,
         term: Term,
         leader_id: PeerId,
         prev_log_index: LogIndex,
@@ -110,7 +113,7 @@ impl NodeService for Service {
             state.persistent.current_term = term;
             state.commit_persistent().await.unwrap_or_log();
         }
-        if ! state.persistent.log_contains(prev_log_index, prev_log_term) {
+        if !state.persistent.log_contains(prev_log_index, prev_log_term) {
             return (term, false);
         }
         state.persistent.log_append(entries);
@@ -120,7 +123,8 @@ impl NodeService for Service {
     }
 
     async fn request_vote(
-        self, _: context::Context,
+        self,
+        _: context::Context,
         term: Term,
         candidate_id: PeerId,
         last_log_index: LogIndex,
@@ -132,7 +136,11 @@ impl NodeService for Service {
         let current_vote = state.persistent.current_vote;
         let current_log_index = state.persistent.get_log_index();
         let current_log_term = state.persistent.get_log_term();
-        if term < current_term || current_vote.is_some() || current_log_index > last_log_index || current_log_term > last_log_term {
+        if term < current_term
+            || current_vote.is_some()
+            || current_log_index > last_log_index
+            || current_log_term > last_log_term
+        {
             return (current_term, false);
         }
         // preconditions fulfilled, vote for candidate
@@ -143,7 +151,8 @@ impl NodeService for Service {
     }
 
     async fn install_snapshot(
-        self, _: context::Context,
+        self,
+        _: context::Context,
         term: Term,
         leader: PeerId,
         last_log_index: LogIndex,
@@ -151,16 +160,25 @@ impl NodeService for Service {
         data: Vec<u8>,
         last: bool,
     ) -> Term {
-        assert!(leader != self.raft_state.read().await.persistent.keypair.public);
+        assert!(
+            leader
+                != self
+                    .raft_state
+                    .read()
+                    .await
+                    .persistent
+                    .signing_key
+                    .verifying_key()
+        );
         let new_snapshot_state = SnapshotState {
             data: Vec::new(),
             leader,
             last_log_index,
-            last_log_term
+            last_log_term,
         };
         let mut snapshot_state_guard = self.snapshot.lock().await;
         let snapshot_state = snapshot_state_guard.get_or_insert_with(|| new_snapshot_state.clone());
-        
+
         // check if leader, last_log_index, last_log_term are the same, otherwise reset snapshot state.
         // Indicates we are still handling the same update
         if *snapshot_state != new_snapshot_state {
@@ -170,8 +188,9 @@ impl NodeService for Service {
         if last {
             let mut state = self.raft_state.write().await;
 
-            let received_state : ClusterState = serde_json::from_slice(&snapshot_state.data).expect_or_log("Could not deserialize snapshot");
-            
+            let received_state: ClusterState = serde_json::from_slice(&snapshot_state.data)
+                .expect_or_log("Could not deserialize snapshot");
+
             state.persistent.update_term(term);
             state.set_from_raft_snapshot(received_state, last_log_index, last_log_term, leader);
         }

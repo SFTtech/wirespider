@@ -1,18 +1,18 @@
-use std::{collections::HashMap, pin::Pin};
 use std::time::{Duration, Instant};
+use std::{collections::HashMap, pin::Pin};
 
-use ed25519_dalek::Keypair;
-use rand::Rng;
-use rand::rngs::OsRng;
-use sqlx::{prelude::*, query, SqlitePool};
-use serde_json::{from_str, to_string};
-use futures::Future;
-use tokio::time::{Sleep, sleep};
-use tracing_unwrap::ResultExt;
 use super::ClusterState;
-use super::{PeerId, log::LogEntry};
-use serde::{Serialize, Deserialize};
+use super::{log::LogEntry, PeerId};
+use ed25519_dalek::{SigningKey, PUBLIC_KEY_LENGTH};
+use futures::Future;
+use rand::rngs::OsRng;
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+use serde_json::{from_str, to_string};
+use sqlx::{prelude::*, query, SqlitePool};
 use thiserror::Error;
+use tokio::time::{sleep, Sleep};
+use tracing_unwrap::ResultExt;
 
 use super::log::{Log, LogError, LogIndex};
 
@@ -51,9 +51,7 @@ pub struct LeaderState {
     pub follower_match_index: HashMap<PeerId, u64>,
 }
 
-pub struct RaftVolatileState {
-    
-}
+pub struct RaftVolatileState {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RaftPersistentState {
@@ -64,13 +62,13 @@ pub struct RaftPersistentState {
     #[serde(skip)]
     log: Log,
     state: ClusterState,
-    pub keypair: Keypair,
+    pub signing_key: SigningKey,
 }
 
 #[derive(Clone)]
 pub enum RaftRole {
     /// this is the follower role without a known leader
-    Initialized, 
+    Initialized,
     Follower(PeerId),
     Candidate(HashMap<PeerId, bool>),
     Leader(LeaderState),
@@ -97,11 +95,18 @@ pub enum RaftStateError {
 impl RaftState {
     pub async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
         let persistent = RaftPersistentState::from_db(&pool).await?;
-        let key_bytes : Vec<u8> = query("SELECT value FROM keyvalue WHERE key='last_leader'").fetch_one(&pool).await?.try_get("value")?;
+        let key_bytes: [u8; PUBLIC_KEY_LENGTH] =
+            query("SELECT value FROM keyvalue WHERE key='last_leader'")
+                .fetch_one(&pool)
+                .await?
+                .try_get::<Vec<u8>, &str>("value")?
+                .try_into()
+                .expect_or_log("Invalid leaderid in DB");
         let role = if key_bytes.is_empty() {
             RaftRole::Initialized
         } else {
-            let last_known_leader = PeerId::from_bytes(&key_bytes).expect_or_log("Invalid leaderid in DB");
+            let last_known_leader =
+                PeerId::from_bytes(&key_bytes).expect_or_log("Invalid last_known_leader in DB");
             RaftRole::Follower(last_known_leader)
         };
 
@@ -119,31 +124,38 @@ impl RaftState {
         Ok(())
     }
 
-    pub fn set_from_raft_snapshot(&mut self, received : ClusterState, last_log_index: LogIndex, last_log_term : Term, leader: PeerId) {
+    pub fn set_from_raft_snapshot(
+        &mut self,
+        received: ClusterState,
+        last_log_index: LogIndex,
+        last_log_term: Term,
+        leader: PeerId,
+    ) {
         self.persistent.state = received;
         self.persistent.log.reset_to(last_log_term, last_log_index);
         self.role = RaftRole::Follower(leader);
     }
-
 }
 
 impl RaftPersistentState {
     pub fn new() -> RaftPersistentState {
-        let mut rng = OsRng{};
-        let keypair = Keypair::generate(&mut rng);
+        let mut rng = OsRng {};
+        let signing_key = SigningKey::generate(&mut rng);
         RaftPersistentState {
-            keypair,
+            signing_key,
             log: Log::default(),
             current_term: Term(0),
             current_vote: None,
             last_applied: Term(0),
-            state: ClusterState::default()
+            state: ClusterState::default(),
         }
     }
 
     pub async fn from_db(pool: &SqlitePool) -> Result<RaftPersistentState, RaftStateError> {
-        let data = query("SELECT value FROM keyvalue WHERE key='raft'").fetch_one(pool).await?;
-        let data_str : &str = data.try_get("value")?;
+        let data = query("SELECT value FROM keyvalue WHERE key='raft'")
+            .fetch_one(pool)
+            .await?;
+        let data_str: &str = data.try_get("value")?;
         let store = if data_str.len() == 0 {
             let store = RaftPersistentState::new();
             store.store(pool).await?;
@@ -157,7 +169,10 @@ impl RaftPersistentState {
     }
 
     pub async fn store(&self, pool: &SqlitePool) -> Result<(), RaftStateError> {
-        query("UPDATE keyvalue SET value=? WHERE key='raft'").bind(to_string(self)?).execute(pool).await?;
+        query("UPDATE keyvalue SET value=? WHERE key='raft'")
+            .bind(to_string(self)?)
+            .execute(pool)
+            .await?;
         self.log.store(pool).await?;
         Ok(())
     }
@@ -171,7 +186,7 @@ impl RaftPersistentState {
         self.log.commit_index()
     }
 
-    /// this 
+    /// this
     pub fn get_log_term(&self) -> Term {
         self.log.last_log_term()
     }
@@ -199,7 +214,6 @@ impl RaftPersistentState {
             self.current_vote = None;
         }
     }
-
 }
 
 #[derive(Debug)]
@@ -212,15 +226,26 @@ pub struct ElectionTimeout {
 impl Future for ElectionTimeout {
     type Output = ();
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
         self.timer.as_mut().poll(cx)
     }
 }
 
 impl ElectionTimeout {
     pub fn reset(&mut self) {
-        let timeout = Duration::from_millis(rand::thread_rng().gen_range(self.minimum_timeout_ms..self.maximum_timeout_ms));
-        self.timer.as_mut().reset(Instant::now().checked_add(timeout).ok_or("invalid timeout").unwrap_or_log().into());
+        let timeout = Duration::from_millis(
+            rand::thread_rng().gen_range(self.minimum_timeout_ms..self.maximum_timeout_ms),
+        );
+        self.timer.as_mut().reset(
+            Instant::now()
+                .checked_add(timeout)
+                .ok_or("invalid timeout")
+                .unwrap_or_log()
+                .into(),
+        );
     }
 
     fn new() -> ElectionTimeout {
@@ -228,7 +253,11 @@ impl ElectionTimeout {
         let minimum = 1000;
         let maximum = 10000;
         let duration = Duration::from_millis(rand::thread_rng().gen_range(minimum..maximum));
-        ElectionTimeout { minimum_timeout_ms: minimum, maximum_timeout_ms: maximum, timer: Box::pin(sleep(duration)) }
+        ElectionTimeout {
+            minimum_timeout_ms: minimum,
+            maximum_timeout_ms: maximum,
+            timer: Box::pin(sleep(duration)),
+        }
     }
 }
 
@@ -253,5 +282,4 @@ mod tests {
         let state = RaftState::new(pool).await.unwrap();
         state.commit_persistent().await.unwrap();
     }
-
 }

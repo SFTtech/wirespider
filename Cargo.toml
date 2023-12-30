@@ -11,24 +11,24 @@ description = "Wirespider distributes wireguard tunnel configurations and routes
 clap = { version = "4", features = ["derive","env"] }
 clap_complete = "4"
 lazy_static = "1.4.0"
-itertools = "0.10.5"
+itertools = "0.12"
 getset = "0.1.2"
 
 #wireguard
 wireguard-uapi = "3"
-boringtun = { git = "https://github.com/cloudflare/boringtun.git" }
-x25519-dalek = { version = "=2.0.0-rc.2", features = ["serde"]}
-ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
-curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5", features = ["serde"]}
+boringtun = {git = "https://github.com/cloudflare/boringtun.git", rev = "f672bb6c1e1e371240a8d151f15854687eb740bb"}
+x25519-dalek = { version = "2", features = ["serde"]}
+ed25519-dalek = { version = "2", features = ["serde", "rand_core"]}
+curve25519-dalek = { version = "4", features = ["serde"]}
 
 # grpc
-tonic = { version = "0.9", features = ["tls", "tls-webpki-roots"]}
-prost = "0.11.0"
+tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"]}
+prost = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-typed-builder = "0.14.0"
+typed-builder = "0.18.0"
 
 # tarpc
 tarpc = { version = "0.33", default-features = false, features = ["tokio1", "serde-transport", "serde-transport-bincode"] }
@@ -37,7 +37,7 @@ bincode = "1"
 serde_json = "1"
 
 #database
-sqlx = { version = "0.6", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
+sqlx = { version = "0.7", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.21"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = { version = "2.4", features = ["serde"] }
@@ -62,20 +62,20 @@ trackable = "1.2.0"
 network-interface = "1"
 
 # shutdown
-tokio-graceful-shutdown = "0.12"
+tokio-graceful-shutdown = "0.14"
 
 # retry
 backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
 
 [build-dependencies]
-tonic-build = { version = "0.9" }
-prost-build = { version = "0.11" }
+tonic-build = { version = "0.10" }
+prost-build = { version = "0.12" }
 clap = { version = "4", features = ["derive","env"] }
 clap_complete = "4"
 uuid = "1"
 ipnet = "2.4.0"
 serde = "1"
-tonic = { version = "0.9", features = ["tls", "tls-webpki-roots"]}
+tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"]}
 
 [features]
 network-test = []
@@ -111,7 +111,3 @@ assets = [
     { source = "completions/wirespider.bash", dest = "/usr/share/bash-completion/completions/wirespider", mode = "644" },
 ]
 
-[patch.crates-io]
-# x25519-dalek = { version = "=2.0.0-rc.2"}
-ed25519-dalek = { git = "https://github.com/dalek-cryptography/ed25519-dalek", branch="update-deps", features = ["serde"]}
-curve25519-dalek = { git = "https://github.com/DenisKolodin/curve25519-dalek", branch="zeroize-1.5"}

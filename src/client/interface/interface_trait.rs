@@ -41,7 +41,6 @@ pub trait OverlayManagementInterface: Sized {
         addresses: Vec<IpNet>,
         mac_addr: MacAddr6,
     ) -> Result<Self, Self::Error>;
-    fn set_peer(&self, mac_addr: MacAddr6, net: IpNet, remote: IpAddr)
-        -> Result<(), Self::Error>;
+    fn set_peer(&self, mac_addr: MacAddr6, net: IpNet, remote: IpAddr) -> Result<(), Self::Error>;
     fn remove_peer(&self, mac_addr: MacAddr6) -> Result<(), Self::Error>;
 }

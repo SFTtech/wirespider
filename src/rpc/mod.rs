@@ -1,7 +1,7 @@
-use std::collections::{HashSet, HashMap};
-use std::net::{SocketAddr, IpAddr};
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, SocketAddr};
 
-use ed25519_dalek::PublicKey;
+use ed25519_dalek::VerifyingKey;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
@@ -18,7 +18,7 @@ pub mod signed;
 
 use uuid::Uuid;
 
-type PeerId = ed25519_dalek::PublicKey;
+type PeerId = ed25519_dalek::VerifyingKey;
 
 use super::WIRESPIDER_VERSION;
 
@@ -34,7 +34,7 @@ enum NatType {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeState {
     node: PeerId,
-    wireguard_key: PublicKey,
+    wireguard_key: VerifyingKey,
     public_endpoint: String,
     nat_type: NatType,
     external_ips: Vec<SocketAddr>,
@@ -65,7 +65,7 @@ pub struct ClusterNetwork {
     net_type: ClusterNetworkType,
     /// parent defines on top of which network is this network built.
     /// if it is none, then it is the outermost layer and it is using the internet
-    parent: Option<Uuid>
+    parent: Option<Uuid>,
 }
 
 /// Technology of the overlay network and if needed additional info.
@@ -85,7 +85,7 @@ pub enum ClusterStateUpdate {
     RemoveNode(PeerId),
     AddNetwork(Uuid, ClusterNetwork),
     ChangeNetwork(Uuid, ClusterNetwork),
-    RemoveNetwork(Uuid)
+    RemoveNetwork(Uuid),
 }
 
 /**

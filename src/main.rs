@@ -8,7 +8,6 @@ use client::{client_manage, client_start};
 use server::commands::{server_manage, server_run};
 use wirespider::protocol::NatType;
 
-
 impl From<cli::NatType> for NatType {
     fn from(other: cli::NatType) -> NatType {
         match other {

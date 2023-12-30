@@ -1,7 +1,6 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use super::{PeerId, NodeState};
-
+use super::{NodeState, PeerId};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ConnectionState {
