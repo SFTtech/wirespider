@@ -128,7 +128,7 @@ async fn run_nat_test(
     rng.try_fill_bytes(&mut transaction_id_data).unwrap_or_log();
     let transaction_id = TransactionId::new(transaction_id_data);
 
-    let mut encoder = MessageEncoder::new();
+    let mut encoder = MessageEncoder::<Attribute>::new();
     let mut decoder = MessageDecoder::<Attribute>::new();
     let mut message = Message::new(MessageClass::Request, BINDING, transaction_id);
     message.add_attribute(ChangeRequest::new(
