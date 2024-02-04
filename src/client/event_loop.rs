@@ -11,7 +11,7 @@ use network_interface::NetworkInterfaceConfig;
 use rand::{rngs::OsRng, Rng};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{debug, error, warn};
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::{
@@ -152,9 +152,9 @@ pub async fn event_loop(
     let monitor_interface = interface.clone();
     let monitor_client = client.clone();
     let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
-    subsys.start("monitor", move |subsys| {
+    subsys.start(SubsystemBuilder::new("monitor", move |subsys| {
         monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
-    });
+    }));
 
     let overlay_address_list = address_reply
         .overlay_ips

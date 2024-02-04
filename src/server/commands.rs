@@ -7,7 +7,7 @@ use crate::cli::{
 use crate::server::protocol::WirespiderServerState;
 
 use anyhow::Context;
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tokio_graceful_shutdown::Toplevel;
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
@@ -49,14 +49,14 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
     env::set_var("DATABASE_URL", &opt.base.db.database_url);
     debug!("Starting");
 
-    Toplevel::new()
-        .start("TonicService", move |handle| {
-            tonic_service(handle, opt.bind)
+    Toplevel::new(move |s| async move {
+            s.start(SubsystemBuilder::new("TonicService", move |handle| {
+                tonic_service(handle, opt.bind)
+            }));
         })
         .catch_signals()
         .handle_shutdown_requests(Duration::from_millis(1000))
         .await?;
-
     Ok(())
 }
 
