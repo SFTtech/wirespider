@@ -7,8 +7,8 @@ use crate::cli::{
 use crate::server::protocol::WirespiderServerState;
 
 use anyhow::Context;
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tokio_graceful_shutdown::Toplevel;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::prelude::*;
@@ -50,13 +50,13 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
     debug!("Starting");
 
     Toplevel::new(move |s| async move {
-            s.start(SubsystemBuilder::new("TonicService", move |handle| {
-                tonic_service(handle, opt.bind)
-            }));
-        })
-        .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
-        .await?;
+        s.start(SubsystemBuilder::new("TonicService", move |handle| {
+            tonic_service(handle, opt.bind)
+        }));
+    })
+    .catch_signals()
+    .handle_shutdown_requests(Duration::from_millis(1000))
+    .await?;
     Ok(())
 }
 

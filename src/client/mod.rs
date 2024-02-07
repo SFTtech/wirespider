@@ -94,11 +94,13 @@ fn set_loglevel(opt: &BaseOptions) -> Result<(), tracing::dispatcher::SetGlobalD
 pub async fn client_start(start_opts: ClientStartCommand) -> anyhow::Result<()> {
     set_loglevel(&start_opts.base)?;
     Toplevel::new(|s| async move {
-            s.start(SubsystemBuilder::new("Eventloop", |subsys| event_loop(subsys, start_opts)));
-        })
-        .catch_signals()
-        .handle_shutdown_requests(Duration::from_millis(1000))
-        .await?;
+        s.start(SubsystemBuilder::new("Eventloop", |subsys| {
+            event_loop(subsys, start_opts)
+        }));
+    })
+    .catch_signals()
+    .handle_shutdown_requests(Duration::from_millis(1000))
+    .await?;
     Ok(())
 }
 
