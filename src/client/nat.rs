@@ -123,7 +123,7 @@ async fn run_nat_test(
     from_alternative_ip: bool,
     from_alternative_port: bool,
 ) -> Result<Vec<Attribute>, ()> {
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     let mut transaction_id_data = [0; 12];
     rng.try_fill_bytes(&mut transaction_id_data).unwrap_or_log();
     let transaction_id = TransactionId::new(transaction_id_data);

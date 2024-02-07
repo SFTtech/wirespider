@@ -52,7 +52,7 @@ pub async fn event_loop(
     start_opts: ClientStartCommand,
 ) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
-    let mut rng = OsRng::default();
+    let mut rng = OsRng;
     // delete the existing device, so we do not disturb the nat detection
     DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
     let backoff = backoff::ExponentialBackoffBuilder::new()
@@ -91,7 +91,7 @@ pub async fn event_loop(
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = StaticSecret::random_from_rng(OsRng::default());
+        let private_key = StaticSecret::random_from_rng(OsRng);
         tokio::fs::write(
             &start_opts.private_key,
             BASE64_STANDARD.encode(private_key.to_bytes()),
