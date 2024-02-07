@@ -16,7 +16,7 @@ itertools = "0.12.1"
 #wireguard
 wireguard-uapi = "3"
 boringtun = { git = "https://github.com/cloudflare/boringtun.git", rev = "e1d6360d6ab4529fc942a078e4c54df107abe2ba"}
-x25519-dalek = "2.0.0"
+x25519-dalek = "2.0.1"
 
 # grpc
 tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"]}
