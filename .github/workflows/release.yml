@@ -39,15 +39,15 @@ jobs:
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
       - name: Install cargo-get
-        uses: baptiste0928/cargo-install@v1
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-get
       - name: Install cargo-deb
-        uses: baptiste0928/cargo-install@v1
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-deb
       - name: Install cargo-generate-rpm
-        uses: baptiste0928/cargo-install@v1
+        uses: baptiste0928/cargo-install@v3
         with:
           crate: cargo-generate-rpm
       - name: Cargo Cache
