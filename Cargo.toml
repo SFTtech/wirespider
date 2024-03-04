@@ -29,7 +29,7 @@ typed-builder = "0.18.1"
 
 #database
 sqlx = { version = "0.7", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
-base64 = "0.21"
+base64 = "0.22"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.9"
 iprange = "0.6.7"
