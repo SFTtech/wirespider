@@ -20,7 +20,7 @@ x25519-dalek = "2.0.1"
 
 # grpc
 tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"]}
-prost = "0.12.3"
+prost = "0.12.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
