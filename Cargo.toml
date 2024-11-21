@@ -78,7 +78,7 @@ clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 uuid = "1"
 ipnet = "2.10.1"
-tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"] }
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
 
 [features]
 network-test = []
