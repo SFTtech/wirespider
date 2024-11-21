@@ -8,27 +8,40 @@ readme = "README.md"
 description = "Wirespider distributes wireguard tunnel configurations and routes"
 
 [dependencies]
-clap = { version = "4", features = ["derive","env"] }
+clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 lazy_static = "1.5.0"
 itertools = "0.13.0"
 
 #wireguard
 wireguard-uapi = "3"
-boringtun = { git = "https://github.com/cloudflare/boringtun.git", rev = "e1d6360d6ab4529fc942a078e4c54df107abe2ba"}
+boringtun = { git = "https://github.com/firezone/boringtun.git", rev = "7cae12daa8978d705b807ab87a10f13756c89fb7" }
 x25519-dalek = "2.0.1"
 
 # grpc
-tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"]}
-prost = "0.12.6"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "process", "signal"] }
+tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+prost = "0.13"
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "net",
+    "process",
+    "signal",
+] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 typed-builder = "0.20.0"
 
 #database
-sqlx = { version = "0.8", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "sqlite",
+    "uuid",
+    "migrate",
+    "macros",
+] }
 base64 = "0.22"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.10"
@@ -37,7 +50,7 @@ macaddr = "1.0"
 uuid = { version = "1", features = ["v4"] }
 
 # tracing
-tracing = {version = "0.1", features = ["release_max_level_debug"] }
+tracing = { version = "0.1", features = ["release_max_level_debug"] }
 tracing-subscriber = "0.3"
 tracing-error = "0.2"
 tracing-unwrap = "1.0"
@@ -56,16 +69,16 @@ network-interface = "2"
 tokio-graceful-shutdown = "0.15"
 
 # retry
-backoff = {version = "0.4.0", features = [ "futures", "tokio" ] }
+backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 
 [build-dependencies]
-tonic-build = { version = "0.11" }
-prost-build = { version = "0.12" }
-clap = { version = "4", features = ["derive","env"] }
+tonic-build = { version = "0.12" }
+prost-build = { version = "0.13" }
+clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 uuid = "1"
 ipnet = "2.10.1"
-tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"]}
+tonic = { version = "0.11", features = ["tls", "tls-webpki-roots"] }
 
 [features]
 network-test = []
@@ -75,14 +88,46 @@ maintainer-scripts = "debian/"
 depends = "$auto, wireguard-tools, iproute2"
 section = "net"
 assets = [
-    ["target/release/wirespider", "usr/bin/", "755"],
-    ["README.md", "usr/share/doc/wirespider/README", "644"],
-    ["CHANGELOG.md", "usr/share/doc/wirespider/CHANGELOG", "644"],
-    ["systemd/system/wirespider-client@.service", "lib/systemd/system/", "644"],
-    ["systemd/system/wirespider-server.service", "lib/systemd/system/", "644"],
-    ["systemd/wirespider/wg0", "etc/wirespider/wg0-example", "644"],
-    ["completions/_wirespider", "usr/share/zsh/site-functions/", "644"],
-    ["completions/wirespider.bash", "usr/share/bash-completion/completions/wirespider", "644"],
+    [
+        "target/release/wirespider",
+        "usr/bin/",
+        "755",
+    ],
+    [
+        "README.md",
+        "usr/share/doc/wirespider/README",
+        "644",
+    ],
+    [
+        "CHANGELOG.md",
+        "usr/share/doc/wirespider/CHANGELOG",
+        "644",
+    ],
+    [
+        "systemd/system/wirespider-client@.service",
+        "lib/systemd/system/",
+        "644",
+    ],
+    [
+        "systemd/system/wirespider-server.service",
+        "lib/systemd/system/",
+        "644",
+    ],
+    [
+        "systemd/wirespider/wg0",
+        "etc/wirespider/wg0-example",
+        "644",
+    ],
+    [
+        "completions/_wirespider",
+        "usr/share/zsh/site-functions/",
+        "644",
+    ],
+    [
+        "completions/wirespider.bash",
+        "usr/share/bash-completion/completions/wirespider",
+        "644",
+    ],
 ]
 
 [package.metadata.generate-rpm.requires]

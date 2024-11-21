@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.field_attribute("wirespider.Peer.tunnel_ips", "#[builder(setter(transform = |tunnel_ips: Vec<IpAddr>| tunnel_ips.into_iter().map(Ip::from).collect()))]");
     config.field_attribute("wirespider.Peer.local_ips", "#[builder(setter(transform = |local_ips: Vec<IpAddr>| local_ips.into_iter().map(Ip::from).collect()))]");
     tonic_build::configure()
-        .compile_with_config(config, &["proto/wirespider.proto"], &["proto/"])
+        .compile_protos_with_config(config, &["proto/wirespider.proto"], &["proto/"])
         .expect("Could not compile proto files");
 
     let mut cmd = Cli::command();
