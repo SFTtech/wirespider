@@ -2,7 +2,7 @@
 name = "wirespider"
 version = "0.5.1"
 authors = ["Linus Karl <linus@lotz.li>"]
-license = "GPL-3"
+license = "AGPL-3"
 edition = "2021"
 readme = "README.md"
 description = "Wirespider distributes wireguard tunnel configurations and routes"
