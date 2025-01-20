@@ -44,7 +44,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 ] }
 base64 = "0.22"
 rand = { version = "0.8", features = ["getrandom"] }
-ipnet = "2.10"
+ipnet = "2.11"
 iprange = "0.6.7"
 macaddr = "1.0"
 uuid = { version = "1", features = ["v4"] }
@@ -77,7 +77,7 @@ prost-build = { version = "0.13" }
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 uuid = "1"
-ipnet = "2.10.1"
+ipnet = "2.11.0"
 tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
 
 [features]
