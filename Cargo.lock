@@ -3132,9 +3132,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "wireguard-uapi"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89ba4e9811befc20af3b6efb15924a7238ee5e8e8706a196576462a00b9f1af1"
+checksum = "5e8a6a3d3823e81397eb9750302b74fab6c265b7e53a37302c01953d55e7e172"
 dependencies = [
  "derive_builder",
  "libc",
