@@ -1,7 +1,7 @@
 use clap::CommandFactory;
 use clap_complete::{generate_to, shells::Bash, shells::Zsh};
-use tonic_prost_build::Config;
 use std::fs::create_dir;
+use tonic_prost_build::Config;
 
 include!("src/cli.rs");
 
