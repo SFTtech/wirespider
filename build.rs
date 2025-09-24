@@ -1,6 +1,6 @@
 use clap::CommandFactory;
 use clap_complete::{generate_to, shells::Bash, shells::Zsh};
-use prost_build::Config;
+use tonic_prost_build::Config;
 use std::fs::create_dir;
 
 include!("src/cli.rs");
@@ -18,8 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     config.field_attribute("wirespider.Peer.node_flags", "#[builder(setter(!strip_option, transform = |monitor: bool, relay: bool| Some(NodeFlags{monitor, relay})))]");
     config.field_attribute("wirespider.Peer.tunnel_ips", "#[builder(setter(transform = |tunnel_ips: Vec<IpAddr>| tunnel_ips.into_iter().map(Ip::from).collect()))]");
     config.field_attribute("wirespider.Peer.local_ips", "#[builder(setter(transform = |local_ips: Vec<IpAddr>| local_ips.into_iter().map(Ip::from).collect()))]");
-    tonic_build::configure()
-        .compile_protos_with_config(config, &["proto/wirespider.proto"], &["proto/"])
+    tonic_prost_build::configure()
+        .compile_with_config(config, &["proto/wirespider.proto"], &["proto/"])
         .expect("Could not compile proto files");
 
     let mut cmd = Cli::command();
