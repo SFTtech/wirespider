@@ -33,7 +33,7 @@ tokio = { version = "1", features = [
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-typed-builder = "0.22.0"
+typed-builder = "0.23.0"
 
 #database
 sqlx = { version = "0.8", default-features = false, features = [
