@@ -27,7 +27,7 @@ jobs:
       RUST_BACKTRACE: full
       RUSTV: stable
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Install Rust
         id: rust
         uses: actions-rs/toolchain@v1
