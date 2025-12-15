@@ -58,7 +58,7 @@ jobs:
           components: "clippy, rustfmt"
           override: true
       - name: Cache registry, build data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         continue-on-error: false
         with:
           path: |
