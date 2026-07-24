@@ -43,7 +43,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "migrate",
     "macros",
 ] }
-base64 = "0.22"
+base64 = "0.23"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = "2.12"
 iprange = "0.6.7"
