@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::time::Duration;
 
 mod client_state;
@@ -10,71 +11,21 @@ mod nat;
 
 use crate::cli::{
     BaseOptions, ClientManageCommand, ClientManagePeerCommand, ClientManageRouteCommand,
-    ClientStartCommand, ConnectionOptions,
+    ClientStartCommand,
 };
 use crate::client::event_loop::event_loop;
-use base64::prelude::{Engine, BASE64_STANDARD};
+use crate::transport::connect;
 use client_state::ClientState;
 use interface::{DefaultOverlayInterface, DefaultWireguardInterface};
-use peer_identifier::Identifier;
-use thiserror::Error;
-use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
-use tonic::codegen::InterceptedService;
-use tonic::metadata::Ascii;
-use tonic::service::Interceptor;
-use tonic::transport::Channel;
-use tonic::{metadata::MetadataValue, transport::Endpoint};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tonic::Request;
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
-use tracing_unwrap::ResultExt;
-use wirespider::protocol::wirespider_client::WirespiderClient;
+use tracing_subscriber::prelude::*;
 use wirespider::protocol::*;
 
-lazy_static! {
-    static ref CLIENT_STATE: ClientState = ClientState::default();
-}
-
-#[derive(Clone)]
-pub struct WirespiderInterceptor {
-    token: MetadataValue<Ascii>,
-}
-
-#[derive(Error, Debug)]
-pub enum ConnectionError {
-    #[error(transparent)]
-    TransportError(#[from] tonic::transport::Error),
-}
-
-impl Interceptor for WirespiderInterceptor {
-    fn call(
-        &mut self,
-        mut request: tonic::Request<()>,
-    ) -> Result<tonic::Request<()>, tonic::Status> {
-        request
-            .metadata_mut()
-            .insert("authorization", self.token.clone());
-        Ok(request)
-    }
-}
-
-pub async fn connect(
-    conn: ConnectionOptions,
-) -> Result<WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>, ConnectionError> {
-    let endpoint = Endpoint::from(conn.endpoint)
-        .keep_alive_while_idle(true)
-        .http2_keep_alive_interval(Duration::from_secs(25 * 60));
-    let channel = endpoint.connect().await?;
-    let token = format!("Bearer {}", conn.token)
-        .as_str()
-        .parse()
-        .unwrap_or_log();
-    Ok(WirespiderClient::with_interceptor(
-        channel,
-        WirespiderInterceptor { token },
-    ))
-}
+static CLIENT_STATE: LazyLock<ClientState> = LazyLock::new(ClientState::default);
 
 fn set_loglevel(opt: &BaseOptions) -> Result<(), tracing::dispatcher::SetGlobalDefaultError> {
     let log_level = if opt.debug {
@@ -93,10 +44,12 @@ fn set_loglevel(opt: &BaseOptions) -> Result<(), tracing::dispatcher::SetGlobalD
 
 pub async fn client_start(start_opts: ClientStartCommand) -> anyhow::Result<()> {
     set_loglevel(&start_opts.base)?;
-    Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new("Eventloop", |subsys| {
-            event_loop(subsys, start_opts)
-        }));
+    let client = connect(start_opts.connection.clone()).await?;
+    Toplevel::new(async |s: &mut SubsystemHandle| {
+        s.start(SubsystemBuilder::new(
+            "Eventloop",
+            async move |subsys: &mut SubsystemHandle| event_loop(subsys, client, start_opts).await,
+        ));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_millis(1000))
@@ -108,92 +61,54 @@ pub async fn client_manage(manage_opts: ClientManageCommand) -> anyhow::Result<(
     match manage_opts {
         ClientManageCommand::Peer(peer_opts) => match peer_opts {
             ClientManagePeerCommand::Add(command) => {
-                let mut client = connect(command.connection).await?;
-                let request = AddPeerRequest {
-                    name: command.name,
-                    internal_ip: command.addresses.into_iter().map(|x| x.into()).collect(),
-                    permissions: command.permission_level,
-                };
-                let result = client.add_peer(request).await?;
+                let client = connect(command.connection).await?;
+                let result = client
+                    .add_peer(Request::new(AddPeerRequest {
+                        name: command.name,
+                        internal_ip: command.addresses.into_iter().map(|x| x.into()).collect(),
+                        permissions: command.permission_level,
+                    }))
+                    .await?;
                 println!(
                     "Peer created. Token: {}",
                     uuid::Uuid::from_slice(&result.into_inner().token)?
                 );
             }
             ClientManagePeerCommand::Delete(command) => {
-                let id = if let Some(name) = command.peer.name_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::Name(name)),
-                    }
-                } else if let Some(token) = command.peer.token_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::Token(token.as_bytes().to_vec())),
-                    }
-                } else if let Some(pubkey) = command.peer.public_key_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::PublicKey(
-                            BASE64_STANDARD
-                                .decode(pubkey)
-                                .expect("Could not decode base64 of public key"),
-                        )),
-                    }
-                } else {
-                    unreachable!()
-                };
-                let request = DeletePeerRequest { id: Some(id) };
-                let mut client = connect(command.connection).await?;
-                let result = client.delete_peer(request).await?;
+                let client = connect(command.connection).await?;
+                let result = client
+                    .delete_peer(Request::new(DeletePeerRequest {
+                        id: Some(command.peer.try_into()?),
+                    }))
+                    .await?;
                 println!("{:?}", result.into_inner());
             }
             ClientManagePeerCommand::Change(change) => {
-                let id = if let Some(name) = change.peer.name_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::Name(name)),
-                    }
-                } else if let Some(token) = change.peer.token_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::Token(token.as_bytes().to_vec())),
-                    }
-                } else if let Some(pubkey) = change.peer.public_key_id {
-                    PeerIdentifier {
-                        identifier: Some(Identifier::PublicKey(
-                            BASE64_STANDARD
-                                .decode(pubkey)
-                                .expect("Could not decode base64 of public key"),
+                let client = connect(change.connection).await?;
+                let result = client
+                    .change_peer(Request::new(ChangePeerRequest {
+                        id: Some(change.peer.try_into()?),
+                        what: Some(change_peer_request::What::Endpoint(
+                            change.new_endpoint.into(),
                         )),
-                    }
-                } else {
-                    unreachable!()
-                };
-
-                let request = ChangePeerRequest {
-                    id: Some(id),
-                    what: Some(change_peer_request::What::Endpoint(
-                        change.new_endpoint.into(),
-                    )),
-                };
-                let mut client = connect(change.connection).await?;
-                let result = client.change_peer(request).await?;
+                    }))
+                    .await?;
                 println!("{:?}", result.into_inner());
             }
         },
         ClientManageCommand::Route(route_command) => match route_command {
             ClientManageRouteCommand::Add(add) => {
-                let request = Route {
-                    to: Some(add.net.into()),
-                    via: Some(add.via.into()),
-                };
-                let mut client = connect(add.connection).await?;
-                let result = client.add_route(request).await?;
+                let client = connect(add.connection).await?;
+                let result = client
+                    .add_route(Request::new(Route::new(add.net, add.via)))
+                    .await?;
                 println!("{:?}", result.into_inner());
             }
             ClientManageRouteCommand::Delete(delete) => {
-                let request = Route {
-                    to: Some(delete.net.into()),
-                    via: Some(delete.via.into()),
-                };
-                let mut client = connect(delete.connection).await?;
-                let result = client.del_route(request).await?;
+                let client = connect(delete.connection).await?;
+                let result = client
+                    .del_route(Request::new(Route::new(delete.net, delete.via)))
+                    .await?;
                 println!("{:?}", result.into_inner());
             }
         },

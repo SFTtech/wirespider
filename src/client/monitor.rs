@@ -4,25 +4,23 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio_graceful_shutdown::SubsystemHandle;
-use tonic::codegen::InterceptedService;
-use tonic::transport::Channel;
+use tonic::Request;
 use tracing::error;
 use tracing_unwrap::ResultExt;
-use wirespider::protocol::change_peer_request::What;
-use wirespider::protocol::peer_identifier::Identifier;
-use wirespider::protocol::wirespider_client::WirespiderClient;
 use wirespider::protocol::ChangePeerRequest;
 use wirespider::protocol::PeerIdentifier;
+use wirespider::protocol::change_peer_request::What;
+use wirespider::protocol::peer_identifier::Identifier;
 use x25519_dalek::PublicKey;
 
 use crate::client::client_state::ClientState;
+use crate::transport::Transport;
 use futures::StreamExt;
 use tokio::task;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 use tokio_stream::wrappers::IntervalStream;
 
 use super::interface::WireguardManagementInterface;
-use super::WirespiderInterceptor;
 
 pub(crate) struct Monitor<T: WireguardManagementInterface + Send> {
     interface: Arc<Mutex<T>>,
@@ -42,9 +40,9 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
 
     pub async fn monitor(
         self,
-        subsys: SubsystemHandle,
+        subsys: &mut SubsystemHandle,
         state: &ClientState,
-        mut client: WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>,
+        client: Transport,
     ) -> Result<(), MonitorError> {
         let mut stream = IntervalStream::new(interval(Duration::from_secs(5)));
 
@@ -64,8 +62,8 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                     for peer in device.peers.iter() {
                         if peer.endpoint.is_some() {
                             let allowed_ips = state.get_allowed_ips(peer.public_key).await;
-                            if let Some(allowed_ips) = allowed_ips {
-                                if allowed_ips.len() != peer.allowed_ips.len() {
+                            if let Some(allowed_ips) = allowed_ips
+                                && allowed_ips.len() != peer.allowed_ips.len() {
                                     let persistent_keepalive_interval = NonZeroU16::new(peer.persistent_keepalive_interval);
                                     let pub_key = peer.public_key;
                                     let endpoint = peer.endpoint;
@@ -75,26 +73,25 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                                     }).await
                                     .unwrap().unwrap_or_log();
                                 }
-                            }
                         }
                     }
 
                     if self.peer_updates {
                         let mut peer_endpoint_map = HashMap::new();
                         for peer in device.peers.iter() {
-                            if peer.endpoint.is_some() {
-                                peer_endpoint_map.insert(peer.public_key, peer.endpoint.unwrap());
+                            if let Some(endpoint) = peer.endpoint {
+                                peer_endpoint_map.insert(peer.public_key, endpoint);
                             }
                         }
                         let diff = state.endpoint_compare(peer_endpoint_map).await;
                         for (key, endpoint) in diff {
                             let response = client
-                                .change_peer(ChangePeerRequest {
+                                .change_peer(Request::new(ChangePeerRequest {
                                         id: Some(PeerIdentifier {
                                         identifier: Some(Identifier::PublicKey(key.into())),
                                     }),
                                     what: Some(What::Endpoint(endpoint.into())),
-                                })
+                                }))
                                 .await;
                             if let Err(x) = response {
                                 error!("Error with change peer command: {:?}", x);
