@@ -1,11 +1,11 @@
 use futures::future::join_all;
-use futures::Stream;
 use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use iprange::IpRange;
 use sqlx::error::Error as SqlxError;
 use sqlx::prelude::*;
 use sqlx::sqlite::SqlitePool;
 use std::borrow::BorrowMut;
+use std::cmp;
 use std::collections::HashSet;
 use std::{
     borrow::Borrow,
@@ -14,19 +14,16 @@ use std::{
     convert::TryInto,
     mem,
     net::{IpAddr, SocketAddr},
-    pin::Pin,
     str::FromStr,
     sync::atomic::{AtomicU64, Ordering::Relaxed},
-    usize,
 };
-use std::{cmp, env};
-use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::{Sender, channel};
 use tracing_unwrap::ResultExt;
 use uuid::Uuid;
 use wirespider::WireguardKey;
 
-use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
+use tonic::{Code, Request, Response, Status, metadata::MetadataMap};
 
 use wirespider::protocol::wirespider_server::Wirespider;
 
@@ -39,8 +36,6 @@ use tracing::{debug, error, info, instrument};
 use itertools::Itertools;
 
 const EVENT_DEQUE_MAX_CAPACITY: usize = 1000;
-
-type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send + Sync>>;
 
 #[derive(Debug)]
 pub struct WirespiderServerState {
@@ -88,10 +83,8 @@ async fn send_event_to_single_peer(
 
 impl WirespiderServerState {
     #[instrument]
-    pub async fn new() -> Result<WirespiderServerState, SqlxError> {
-        let sqlite_pool =
-            SqlitePool::connect(&env::var("DATABASE_URL").expect("Please set DATABASE_URL"))
-                .await?;
+    pub async fn new(database_url: &str) -> Result<WirespiderServerState, SqlxError> {
+        let sqlite_pool = SqlitePool::connect(database_url).await?;
         Ok(WirespiderServerState {
             sqlite_pool,
             event_listeners: RwLock::default(),
@@ -566,34 +559,34 @@ impl Wirespider for WirespiderServerState {
             .endpoint
             .clone()
             .and_then(|x| x.try_into().ok());
-        if let Some(endpoint) = new_enpoint {
-            if Some(endpoint) != old_endpoint {
-                updated = true;
-                let endpoint = endpoint.to_string();
-                //update database
-                sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
-                    .bind(endpoint)
-                    .bind(auth_peer.peerid)
-                    .execute(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-            }
+        if let Some(endpoint) = new_enpoint
+            && Some(endpoint) != old_endpoint
+        {
+            updated = true;
+            let endpoint = endpoint.to_string();
+            //update database
+            sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
+                .bind(endpoint)
+                .bind(auth_peer.peerid)
+                .execute(&self.sqlite_pool)
+                .await
+                .into_status()?;
         }
 
         let old_nat_type = NatType::try_from(peer_query.get::<i32, &str>("nat_type"));
         let new_nat_type = request.get_ref().nat_type;
 
-        if let Ok(old_nat_type) = old_nat_type {
-            if new_nat_type != old_nat_type as i32 {
-                updated = true;
-                //update database
-                sqlx::query(r#"UPDATE peers SET nat_type=? WHERE peerid=?"#)
-                    .bind(new_nat_type)
-                    .bind(auth_peer.peerid)
-                    .execute(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-            }
+        if let Ok(old_nat_type) = old_nat_type
+            && new_nat_type != old_nat_type as i32
+        {
+            updated = true;
+            //update database
+            sqlx::query(r#"UPDATE peers SET nat_type=? WHERE peerid=?"#)
+                .bind(new_nat_type)
+                .bind(auth_peer.peerid)
+                .execute(&self.sqlite_pool)
+                .await
+                .into_status()?;
         }
 
         // local ips

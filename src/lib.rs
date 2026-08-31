@@ -5,13 +5,18 @@ pub mod protocol {
     tonic::include_proto!("wirespider"); // The string specified here must match the proto package name
 
     use crate::WireguardKey;
+    use futures::Stream;
     use ipnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::SocketAddr;
+    use std::pin::Pin;
     use std::{
         convert::TryInto,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
     };
     use tonic::Status;
+
+    /// Boxed so that every transport reports the same stream type and stays interchangeable.
+    pub type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send>>;
 
     impl TryInto<IpAddr> for &Ip {
         type Error = Status;

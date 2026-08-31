@@ -2,31 +2,33 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
-use backoff::future::retry;
-use base64::prelude::{Engine, BASE64_STANDARD};
+use backon::{ExponentialBuilder, Retryable};
+use base64::prelude::{BASE64_STANDARD, Engine};
 use ipnet::IpNet;
 use macaddr::MacAddr6;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
-use rand::{rngs::OsRng, Rng};
+use rand::{Rng, RngExt};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tonic::Request;
 use tracing::{debug, error, warn};
 use tracing_unwrap::ResultExt;
 use wirespider::protocol::{
-    event, peer, AddressRequest, EventType, EventsRequest, NatType, NodeFlags,
+    AddressRequest, EventType, EventsRequest, NatType, NodeFlags, event, peer,
 };
 use x25519_dalek::{PublicKey, StaticSecret};
 
 use crate::client::{
-    connect, interface::OverlayManagementInterface, local_ip_detection::check_local_ips,
-    DefaultOverlayInterface,
+    CLIENT_STATE, DefaultWireguardInterface, interface::WireguardManagementInterface, monitor,
+    nat::get_nat_type,
 };
 use crate::client::{
-    interface::WireguardManagementInterface, monitor, nat::get_nat_type, DefaultWireguardInterface,
-    CLIENT_STATE,
+    DefaultOverlayInterface, interface::OverlayManagementInterface,
+    local_ip_detection::check_local_ips,
 };
+use crate::transport::Transport;
 use futures::TryStreamExt;
 
 use crate::cli::ClientStartCommand;
@@ -36,10 +38,6 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum EventLoopError {
     #[error(transparent)]
-    Transport(#[from] tonic::transport::Error),
-    #[error(transparent)]
-    Connection(#[from] crate::client::ConnectionError),
-    #[error(transparent)]
     Status(#[from] tonic::Status),
     #[error(transparent)]
     IO(#[from] std::io::Error),
@@ -47,35 +45,38 @@ pub enum EventLoopError {
     Shutdown,
 }
 
+/// Retry forever, because a client that gave up is a tunnel that stays down.
+fn retry_policy() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_jitter()
+        .with_factor(1.5)
+        .with_min_delay(Duration::from_millis(500))
+        .with_max_delay(Duration::from_secs(60))
+        .without_max_times()
+}
+
 pub async fn event_loop(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
+    client: Transport,
     start_opts: ClientStartCommand,
 ) -> Result<(), EventLoopError> {
-    let mut client = connect(start_opts.connection).await?;
-    let mut rng = OsRng;
     // delete the existing device, so we do not disturb the nat detection
     DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
-    let backoff = backoff::ExponentialBackoffBuilder::new()
-        .with_max_interval(Duration::from_secs(60))
-        .build();
 
     let port = start_opts
         .port
-        .unwrap_or_else(|| rng.gen_range(49152..=65535).try_into().unwrap());
+        .unwrap_or_else(|| rand::rng().random_range(49152..=65535).try_into().unwrap());
 
     let device_name = start_opts.device;
 
-    let nat_backoff = backoff.clone();
     let nat_detection = tokio::spawn(async move {
         if let Some(endpoint) = start_opts.fixed_endpoint {
             Ok((Some(endpoint), start_opts.nat_type.into()))
         } else {
-            let backoff = nat_backoff.clone();
             let stun_host = start_opts.stun_host.clone();
-            retry(backoff, || async {
-                get_nat_type(&stun_host, port).await.map_err(|x| x.into())
-            })
-            .await
+            (|| get_nat_type(&stun_host, port))
+                .retry(retry_policy())
+                .await
         }
     });
     debug!("Nat detection started");
@@ -91,7 +92,9 @@ pub async fn event_loop(
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let mut secret_key_bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut secret_key_bytes);
+        let private_key = StaticSecret::from(secret_key_bytes);
         tokio::fs::write(
             &start_opts.private_key,
             BASE64_STANDARD.encode(private_key.to_bytes()),
@@ -118,7 +121,7 @@ pub async fn event_loop(
         .collect();
     debug!("local ips: {local_ips:?}");
     let address_reply = client
-        .get_addresses(AddressRequest {
+        .get_addresses(Request::new(AddressRequest {
             wg_public_key: Vec::from(pubkey.as_bytes().as_ref()),
             nat_type: nat_type.into(),
             node_flags: Some(NodeFlags {
@@ -128,7 +131,7 @@ pub async fn event_loop(
             endpoint: external_address.map(|x| x.into()),
             local_ips,
             local_port: port.get().into(),
-        })
+        }))
         .await
         .unwrap_or_log()
         .into_inner();
@@ -152,9 +155,12 @@ pub async fn event_loop(
     let monitor_interface = interface.clone();
     let monitor_client = client.clone();
     let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
-    subsys.start(SubsystemBuilder::new("monitor", move |subsys| {
-        monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "monitor",
+        async move |subsys: &mut SubsystemHandle| {
+            monitor.monitor(subsys, &CLIENT_STATE, monitor_client).await
+        },
+    ));
 
     let overlay_address_list = address_reply
         .overlay_ips
@@ -177,18 +183,17 @@ pub async fn event_loop(
     .expect("could not create overlay device");
     let mut event_counter = 0;
     loop {
-        let backoff = backoff::ExponentialBackoffBuilder::new()
-            .with_max_interval(Duration::from_secs(60))
-            .build();
-        let events_stream = retry(backoff, || async {
-                let mut client = client.clone();
-                tokio::select! {
-                    _ = subsys.on_shutdown_requested() => Err(backoff::Error::Permanent(EventLoopError::Shutdown)),
-                    event = client.get_events(EventsRequest {
-                            start_event: event_counter,
-                        }) => event.map_err(|x| backoff::Error::transient(x.into()))
-                }
-            })
+        let events_stream = (|| async {
+            let client = client.clone();
+            tokio::select! {
+                _ = subsys.on_shutdown_requested() => Err(EventLoopError::Shutdown),
+                event = client.get_events(Request::new(EventsRequest {
+                        start_event: event_counter,
+                    })) => event.map_err(EventLoopError::from)
+            }
+        })
+        .retry(retry_policy())
+        .when(|error| !matches!(error, EventLoopError::Shutdown))
         .await;
         let mut events_stream = match events_stream {
             Ok(x) => x.into_inner(),
@@ -276,14 +281,14 @@ pub async fn event_loop(
                                     interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
                                     create = true;
                                     // send a single packet to this peer to redo the handshake
-                                    if let Ok(socket) = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await {
+                                    match UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await { Ok(socket) => {
                                         debug!("Sending packet to initiate handshake to {:?}", destination_ip);
                                         if let Err(e) = socket.send_to("wirespider".as_bytes(), SocketAddr::from((destination_ip, 1337))).await {
                                             warn!("Error sending packet: {:?}", e);
                                         }
-                                    } else {
+                                    } _ => {
                                         warn!("Could not bind to udp socket");
-                                    }
+                                    }}
                                 }
                                 if !create {
                                     // we could not find a local ip and the nat setup would prevent direct connection so we remove all allowed ips.

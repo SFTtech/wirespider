@@ -11,10 +11,10 @@ use tokio_graceful_shutdown::Toplevel;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::metadata::LevelFilter;
 use tracing_error::ErrorLayer;
-use tracing_subscriber::prelude::*;
 use tracing_subscriber::Registry;
+use tracing_subscriber::prelude::*;
 
-use std::{collections::HashMap, env};
+use std::collections::HashMap;
 
 use tonic::transport::Server;
 
@@ -46,13 +46,16 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
 
     tracing::subscriber::set_global_default(subscriber)?;
 
-    env::set_var("DATABASE_URL", &opt.base.db.database_url);
     debug!("Starting");
 
-    Toplevel::new(move |s| async move {
-        s.start(SubsystemBuilder::new("TonicService", move |handle| {
-            tonic_service(handle, opt.bind)
-        }));
+    let database_url = opt.base.db.database_url;
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
+        s.start(SubsystemBuilder::new(
+            "TonicService",
+            async move |handle: &mut SubsystemHandle| {
+                tonic_service(handle, opt.bind, &database_url).await
+            },
+        ));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_millis(1000))
@@ -60,8 +63,12 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn tonic_service(subsys: SubsystemHandle, bind: SocketAddr) -> anyhow::Result<()> {
-    let wirespider = WirespiderServer::new(WirespiderServerState::new().await?);
+async fn tonic_service(
+    subsys: &mut SubsystemHandle,
+    bind: SocketAddr,
+    database_url: &str,
+) -> anyhow::Result<()> {
+    let wirespider = WirespiderServer::new(WirespiderServerState::new(database_url).await?);
 
     info!("Starting Server on {:?}", bind);
     tokio::select! {

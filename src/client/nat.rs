@@ -4,20 +4,19 @@ use std::num::NonZeroU16;
 use std::time::Duration;
 
 use bytecodec::{DecodeExt, EncodeExt};
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::Rng;
 
+use stun_codec::MessageDecoder;
+use stun_codec::MessageEncoder;
+use stun_codec::TransactionId;
 use stun_codec::define_attribute_enums;
 use stun_codec::rfc5389::attributes::*;
 use stun_codec::rfc5389::methods::BINDING;
 use stun_codec::rfc5780::attributes::*;
-use stun_codec::MessageDecoder;
-use stun_codec::MessageEncoder;
-use stun_codec::TransactionId;
 use stun_codec::{Message, MessageClass};
 
-use tokio::net::lookup_host;
 use tokio::net::UdpSocket;
+use tokio::net::lookup_host;
 use tokio::time::timeout;
 use tracing::debug;
 use tracing::instrument;
@@ -123,9 +122,8 @@ async fn run_nat_test(
     from_alternative_ip: bool,
     from_alternative_port: bool,
 ) -> Result<Vec<Attribute>, ()> {
-    let mut rng = OsRng;
     let mut transaction_id_data = [0; 12];
-    rng.try_fill_bytes(&mut transaction_id_data).unwrap_or_log();
+    rand::rng().fill_bytes(&mut transaction_id_data);
     let transaction_id = TransactionId::new(transaction_id_data);
 
     let mut encoder = MessageEncoder::<Attribute>::new();

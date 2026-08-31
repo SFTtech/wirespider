@@ -5,9 +5,9 @@ use std::{net::SocketAddr, num::NonZeroU16, process::Command};
 use thiserror::Error;
 use tracing::debug;
 use wireguard_uapi::{
+    DeviceInterface, WgSocket,
     get::Device as GetDevice,
     set::{Device as SetDevice, Peer as SetPeer, WgPeerF},
-    DeviceInterface, WgSocket,
 };
 use x25519_dalek::{PublicKey, StaticSecret};
 

@@ -151,7 +151,7 @@ pub struct BaseOptions {
     pub debug: bool,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 pub struct ConnectionOptions {
     #[arg(short, long, env = "WS_ENDPOINT", value_hint = ValueHint::Url, help = "Server endpoint (format: https://server:port)")]
     pub endpoint: Uri,

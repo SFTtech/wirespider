@@ -3,8 +3,8 @@ use std::borrow::{Borrow, BorrowMut};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::RwLock;
-use wirespider::protocol::*;
 use wirespider::WireguardKey;
+use wirespider::protocol::*;
 
 #[derive(Debug, Default)]
 pub(crate) struct ClientState {
