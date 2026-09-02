@@ -1,9 +1,10 @@
 use super::interface_trait::WireguardManagementInterface;
 
+use futures::TryStreamExt;
 use ipnet::IpNet;
-use std::{net::SocketAddr, num::NonZeroU16, process::Command};
+use rtnetlink::{new_connection, Handle, LinkUnspec, LinkWireguard, RouteMessageBuilder};
+use std::{net::SocketAddr, num::NonZeroU16};
 use thiserror::Error;
-use tracing::debug;
 use wireguard_uapi::{
     get::Device as GetDevice,
     set::{Device as SetDevice, Peer as SetPeer, WgPeerF},
@@ -15,6 +16,7 @@ pub struct WireguardUapiInterface {
     device_name: String,
     addresses: Vec<IpNet>,
     wg_socket: WgSocket,
+    rt_handle: Handle,
 }
 
 #[derive(Debug, Error)]
@@ -25,34 +27,50 @@ pub enum WireguardUapiInterfaceError {
     ControlConnection(#[from] wireguard_uapi::err::ConnectError),
     #[error("Error setting wireguard device")]
     SetDevice(#[from] wireguard_uapi::err::SetDeviceError),
+    #[error("Error connecting to rtnetlink socket")]
+    RtnetlinkConnection(#[from] std::io::Error),
+    #[error("Error executing rtnetlink request")]
+    Rtnetlink(#[from] rtnetlink::Error),
+    #[error("Interface {0} not found")]
+    InterfaceNotFound(String),
+}
+
+async fn get_link_index(
+    handle: &Handle,
+    device_name: &str,
+) -> Result<u32, WireguardUapiInterfaceError> {
+    let mut links = handle
+        .link()
+        .get()
+        .match_name(device_name.to_string())
+        .execute();
+    let link = links
+        .try_next()
+        .await?
+        .ok_or_else(|| WireguardUapiInterfaceError::InterfaceNotFound(device_name.to_string()))?;
+    Ok(link.header.index)
 }
 
 impl WireguardManagementInterface for WireguardUapiInterface {
     type Error = WireguardUapiInterfaceError;
 
-    fn create_wireguard_device(
+    async fn create_wireguard_device(
         device_name: String,
         privkey: StaticSecret,
         port: Option<NonZeroU16>,
         addresses: &[IpNet],
     ) -> Result<Self, Self::Error> {
         let mut wg_socket = WgSocket::connect()?;
+        let (connection, rt_handle, _) = new_connection()?;
+        tokio::spawn(connection);
 
         // create interface
-        let output = Command::new("ip")
-            // mtu 1432 for ipv4+pppoe, needs to be changed when ipv6 support is ready
-            .args([
-                "link",
-                "add",
-                &device_name,
-                "mtu",
-                "1432",
-                "type",
-                "wireguard",
-            ])
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
+        // mtu 1432 for ipv4+pppoe, needs to be changed when ipv6 support is ready
+        rt_handle
+            .link()
+            .add(LinkWireguard::new(&device_name).mtu(1432).build())
+            .execute()
+            .await?;
 
         let privkey_bytes = privkey.to_bytes();
         let device = SetDevice {
@@ -65,29 +83,31 @@ impl WireguardManagementInterface for WireguardUapiInterface {
         };
         wg_socket.set_device(device)?;
 
+        let link_index = get_link_index(&rt_handle, &device_name).await?;
+
         for address in addresses {
-            let ip_str = address.to_string();
-            let output = Command::new("ip")
-                .args(["address", "add", "dev", &device_name, &ip_str])
-                .output()
-                .expect("failed to execute process");
-            debug!("{:?}", output);
+            rt_handle
+                .address()
+                .add(link_index, address.addr(), address.prefix_len())
+                .execute()
+                .await?;
         }
 
-        let output = Command::new("ip")
-            .args(["link", "set", &device_name, "up"])
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
+        rt_handle
+            .link()
+            .set(LinkUnspec::new_with_index(link_index).up().build())
+            .execute()
+            .await?;
 
         Ok(WireguardUapiInterface {
             device_name,
             addresses: addresses.to_vec(),
             wg_socket,
+            rt_handle,
         })
     }
 
-    fn set_peer(
+    async fn set_peer(
         &mut self,
         pubkey: PublicKey,
         endpoint: Option<SocketAddr>,
@@ -126,7 +146,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
             .map_err(WireguardUapiInterfaceError::from)
     }
 
-    fn remove_peer(&mut self, pubkey: PublicKey) -> Result<(), Self::Error> {
+    async fn remove_peer(&mut self, pubkey: PublicKey) -> Result<(), Self::Error> {
         let mut device = SetDevice::from_ifname(self.device_name.clone());
         let pubkey = pubkey.as_bytes();
         let mut peer = SetPeer::from_public_key(pubkey);
@@ -137,51 +157,70 @@ impl WireguardManagementInterface for WireguardUapiInterface {
             .map_err(WireguardUapiInterfaceError::from)
     }
 
-    fn add_route(&mut self, network: IpNet, via: std::net::IpAddr) -> Result<(), Self::Error> {
-        let net_str = network.to_string();
-        let via_str = via.to_string();
-        let src_str = self
+    async fn add_route(
+        &mut self,
+        network: IpNet,
+        via: std::net::IpAddr,
+    ) -> Result<(), Self::Error> {
+        let src = self
             .addresses
             .iter()
             .find(|x| via.is_ipv4() == x.addr().is_ipv4())
-            .map(|x| x.addr().to_string())
-            .unwrap_or_default();
-        let mut cmd_args = vec!["route", "add", net_str.as_str(), "via", via_str.as_str()];
-        if !src_str.is_empty() {
-            cmd_args.extend_from_slice(&["src", src_str.as_str()]);
+            .map(|x| x.addr());
+        let mut builder = RouteMessageBuilder::<std::net::IpAddr>::new()
+            .destination_prefix(network.addr(), network.prefix_len())
+            .and_then(|builder| builder.gateway(via));
+        if let Some(src) = src {
+            builder = builder.and_then(|builder| builder.pref_source(src));
         }
-
-        let output = Command::new("ip")
-            .args(&cmd_args)
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
+        let route = builder
+            .map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+            })?
+            .build();
+        self.rt_handle.route().add(route).execute().await?;
         Ok(())
     }
 
-    fn remove_route(&mut self, network: IpNet, via: std::net::IpAddr) -> Result<(), Self::Error> {
-        let net_str = network.to_string();
-        let via_str = via.to_string();
-        let args = ["route", "del", net_str.as_str(), "via", via_str.as_str()];
-
-        let output = Command::new("ip")
-            .args(args)
-            .output()
-            .expect("failed to execute process");
-
-        debug!("{:?}", output);
+    async fn remove_route(
+        &mut self,
+        network: IpNet,
+        via: std::net::IpAddr,
+    ) -> Result<(), Self::Error> {
+        let route = RouteMessageBuilder::<std::net::IpAddr>::new()
+            .destination_prefix(network.addr(), network.prefix_len())
+            .and_then(|builder| builder.gateway(via))
+            .map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
+            })?
+            .build();
+        self.rt_handle.route().del(route).execute().await?;
         Ok(())
     }
 
-    fn delete_device_if_exists(device_name: &str) {
-        let output = Command::new("ip")
-            .args(["link", "del", device_name])
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
+    async fn delete_device_if_exists(device_name: &str) {
+        if let Ok((connection, handle, _)) = new_connection() {
+            tokio::spawn(connection);
+            let mut links = handle
+                .link()
+                .get()
+                .match_name(device_name.to_string())
+                .execute();
+            match links.try_next().await {
+                Ok(Some(link)) => {
+                    if let Err(e) = handle.link().del(link.header.index).execute().await {
+                        tracing::error!("Error deleting interface {}: {:?}", device_name, e);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::error!("Error getting interface {}: {:?}", device_name, e);
+                }
+            }
+        }
     }
 
-    fn get_device(&mut self) -> Result<GetDevice, Self::Error> {
+    async fn get_device(&mut self) -> Result<GetDevice, Self::Error> {
         self.wg_socket
             .get_device(DeviceInterface::from_name(&self.device_name))
             .map_err(WireguardUapiInterfaceError::from)
@@ -190,15 +229,29 @@ impl WireguardManagementInterface for WireguardUapiInterface {
 
 impl Drop for WireguardUapiInterface {
     fn drop(&mut self) {
-        let output = Command::new("ip")
-            .args(["link", "set", &self.device_name, "down"])
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
-        let output = Command::new("ip")
-            .args(["link", "del", &self.device_name])
-            .output()
-            .expect("failed to execute process");
-        debug!("{:?}", output);
+        let handle = self.rt_handle.clone();
+        let device_name = self.device_name.clone();
+        tokio::spawn(async move {
+            let mut links = handle.link().get().match_name(device_name.clone()).execute();
+            match links.try_next().await {
+                Ok(Some(link)) => {
+                    if let Err(e) = handle
+                        .link()
+                        .set(LinkUnspec::new_with_index(link.header.index).down().build())
+                        .execute()
+                        .await
+                    {
+                        tracing::error!("Error setting interface {} down: {:?}", device_name, e);
+                    }
+                    if let Err(e) = handle.link().del(link.header.index).execute().await {
+                        tracing::error!("Error deleting interface {}: {:?}", device_name, e);
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::error!("Error getting interface {}: {:?}", device_name, e);
+                }
+            }
+        });
     }
 }

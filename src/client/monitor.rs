@@ -17,7 +17,6 @@ use x25519_dalek::PublicKey;
 
 use crate::client::client_state::ClientState;
 use futures::StreamExt;
-use tokio::task;
 use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::IntervalStream;
 
@@ -54,11 +53,7 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                     return Ok(())
                 },
                 _ = stream.next() => {
-                    let interface = self.interface.clone();
-                    let device = task::spawn_blocking(move || {
-                        interface.blocking_lock().get_device()
-                    }).await
-                    .unwrap().unwrap();
+                    let device = self.interface.lock().await.get_device().await.unwrap();
 
                     // check if we got a connection to a peer and add the allowed IPs
                     for peer in device.peers.iter() {
@@ -67,13 +62,9 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
                             if let Some(allowed_ips) = allowed_ips {
                                 if allowed_ips.len() != peer.allowed_ips.len() {
                                     let persistent_keepalive_interval = NonZeroU16::new(peer.persistent_keepalive_interval);
-                                    let pub_key = peer.public_key;
+                                    let pub_key = PublicKey::from(peer.public_key);
                                     let endpoint = peer.endpoint;
-                                    let interface = self.interface.clone();
-                                    task::spawn_blocking(move || {
-                                        interface.blocking_lock().set_peer(PublicKey::from(pub_key), endpoint, persistent_keepalive_interval, &allowed_ips)
-                                    }).await
-                                    .unwrap().unwrap_or_log();
+                                    self.interface.lock().await.set_peer(pub_key, endpoint, persistent_keepalive_interval, &allowed_ips).await.unwrap_or_log();
                                 }
                             }
                         }

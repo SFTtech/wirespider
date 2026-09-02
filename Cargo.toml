@@ -16,6 +16,9 @@ getset = "0.1.2"
 
 #wireguard
 wireguard-uapi = "3"
+
+# netlink
+rtnetlink = "0.23"
 boringtun = {git = "https://github.com/cloudflare/boringtun.git", rev = "f672bb6c1e1e371240a8d151f15854687eb740bb"}
 x25519-dalek = { version = "2", features = ["serde"]}
 ed25519-dalek = { version = "2", features = ["serde", "rand_core"]}

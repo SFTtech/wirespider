@@ -54,7 +54,7 @@ pub async fn event_loop(
     let mut client = connect(start_opts.connection).await?;
     let mut rng = OsRng::default();
     // delete the existing device, so we do not disturb the nat detection
-    DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
+    DefaultWireguardInterface::delete_device_if_exists(&start_opts.device).await;
     let backoff = backoff::ExponentialBackoffBuilder::new()
         .with_max_interval(Duration::from_secs(60))
         .build();
@@ -145,6 +145,7 @@ pub async fn event_loop(
             Some(port),
             &address_list,
         )
+        .await
         .expect("Could not set up wireguard device"),
     ));
 
@@ -266,13 +267,14 @@ pub async fn event_loop(
                                     .lock()
                                     .await
                                     .set_peer(peer_pubkey, endpoint, keep_alive, &allowed_ips)
+                                    .await
                                     .unwrap_or_log();
                                 debug!("getting local ips");
                                 let local_sock_addrs = peer.local_ips.iter().map(|x| x.try_into().map(|x : IpAddr| SocketAddr::from((x, peer_port)))).collect::<Result<Vec<_>,_>>().unwrap_or_log();
                                 let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey).await.unwrap_or_log();
                                 debug!("Got local endpoint: {:?}", local_endpoint);
                                 if local_endpoint.is_some() && local_endpoint != endpoint {
-                                    interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).await.unwrap_or_log();
                                     create = true;
                                     // send a single packet to this peer to redo the handshake
                                     if let Ok(socket) = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await {
@@ -290,8 +292,8 @@ pub async fn event_loop(
                                     // The monitor component will check for handshakes and if successfull handshakes are discovered
                                     // it will set the actual allowed ips.
                                     debug!("removing allowed ips");
-                                    interface.lock().await.remove_peer(peer_pubkey).unwrap_or_log();
-                                    interface.lock().await.set_peer(peer_pubkey, None, keep_alive, &[]).unwrap_or_log();
+                                    interface.lock().await.remove_peer(peer_pubkey).await.unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, None, keep_alive, &[]).await.unwrap_or_log();
                                 }
                                 let overlay_ip = peer.overlay_ips.into_iter().next();
                                 if let Some(dest_net) = overlay_ip {
@@ -308,7 +310,7 @@ pub async fn event_loop(
                                 mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
                                 let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
                                 overlay_interface.remove_peer(mac_addr).unwrap_or_log();
-                                interface.lock().await.remove_peer(peer_pubkey).unwrap();
+                                interface.lock().await.remove_peer(peer_pubkey).await.unwrap();
                             }
                         },
                         Some(event::Target::Route(route)) => match event_type {
@@ -318,6 +320,7 @@ pub async fn event_loop(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),
                                     )
+                                    .await
                                     .unwrap();
                             }
                             EventType::Deleted => {
@@ -326,6 +329,7 @@ pub async fn event_loop(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),
                                     )
+                                    .await
                                     .unwrap();
                             }
                             _ => {
