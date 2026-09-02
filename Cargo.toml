@@ -80,6 +80,10 @@ ipnet = "2.4.0"
 serde = "1"
 tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"]}
 
+[dev-dependencies]
+testcontainers = { version = "0.28", default-features = false }
+bollard = { version = "0.21", default-features = false }
+
 [features]
 network-test = []
 
