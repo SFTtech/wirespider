@@ -31,7 +31,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net",
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 async-stream = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-typed-builder = "0.18.0"
+typed-builder = "0.23"
 
 # tarpc
 tarpc = { version = "0.33", default-features = false, features = ["tokio1", "serde-transport", "serde-transport-bincode"] }
