@@ -87,7 +87,6 @@ struct Service {
     snapshot: Arc<Mutex<Option<SnapshotState>>>,
 }
 
-#[tarpc::server]
 impl NodeService for Service {
     async fn get_version(self, _: context::Context) -> Version {
         return WIRESPIDER_VERSION;
