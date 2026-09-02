@@ -79,7 +79,8 @@ mod tests {
         let test_string = "abcde";
         let serialized = serde_json::to_string(test_string).unwrap();
         let signature = signing_key.sign(serialized.as_bytes());
-        let signed: Signed<String> = Signed::from_serialized(serialized, signing_key, signature);
+        let signed: Signed<String> =
+            Signed::from_serialized(serialized, signing_key.verifying_key(), signature);
         assert_eq!(signed.get_inner().unwrap(), test_string);
         assert_eq!(signed.signature(), &signature);
     }
