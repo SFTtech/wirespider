@@ -59,8 +59,8 @@ anyhow = "1"
 thiserror = "2"
 
 # nat traversal
-stun_codec = "0.3.0"
-bytecodec = "0.4.15"
+stun_codec = "0.4"
+bytecodec = "0.5"
 trackable = "1.2.0"
 network-interface = "2"
 
