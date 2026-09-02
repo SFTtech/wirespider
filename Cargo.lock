@@ -4188,7 +4188,6 @@ dependencies = [
  "async-stream",
  "backoff",
  "base64 0.23.1",
- "bincode",
  "bollard",
  "boringtun",
  "bytecodec",
