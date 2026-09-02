@@ -46,6 +46,8 @@ jobs:
     env:
       RUST_BACKTRACE: full
       RUSTV: ${{ matrix.rust }}
+      # the integration tests run in their own job, they need a musl build
+      WS_TEST_SKIP: "1"
     steps:
       - name: Install dependencies
         run: sudo apt-get -y install protobuf-compiler
@@ -72,3 +74,37 @@ jobs:
         run: cargo clippy
       - name: Test
         run: cargo test
+
+  integration-tests:
+    name: Integration tests (containers)
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: full
+    steps:
+      - name: Install dependencies
+        run: sudo apt-get -y install protobuf-compiler musl-tools
+      - uses: actions/checkout@v2
+      - name: Install Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          target: x86_64-unknown-linux-musl
+      - name: Load kernel modules for the container network tests
+        run: sudo modprobe wireguard && sudo modprobe vxlan
+      - name: Cache registry, build data
+        uses: actions/cache@v2
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ./target/
+          key: ${{ runner.os }}-cargo-it-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-it
+      - name: Build statically linked wirespider binary
+        run: cargo build --target x86_64-unknown-linux-musl --bin wirespider
+      - name: Run integration tests
+        run: cargo test --test integration_tests -- --nocapture

@@ -6,8 +6,10 @@ rustflags = ["-C", "target-feature=+crt-static"]
 [env]
 # The C toolchain must be the musl cross compiler: the host gcc compiles the
 # bundled sqlite3 against glibc headers, which fails to link on musl
-# (undefined *64 symbols).
-CC_x86_64_unknown_linux_musl = "/nix/store/3f59zl4cv31k36sa2lcl1gmwbf1mc92i-x86_64-unknown-linux-musl-gcc-wrapper-15.3.0/bin/x86_64-unknown-linux-musl-gcc"
-AR_x86_64_unknown_linux_musl = "/nix/store/3f59zl4cv31k36sa2lcl1gmwbf1mc92i-x86_64-unknown-linux-musl-gcc-wrapper-15.3.0/bin/x86_64-unknown-linux-musl-ar"
+# (undefined *64 symbols). The plain binary names resolve through PATH:
+# install `musl-tools` on Debian/Ubuntu or the musl cross toolchain of your
+# distribution.
+CC_x86_64_unknown_linux_musl = "x86_64-unknown-linux-musl-gcc"
+AR_x86_64_unknown_linux_musl = "x86_64-unknown-linux-musl-ar"
 # musl needs _LARGEFILE64_SOURCE for the *64 syscall wrappers sqlite3 uses.
 CFLAGS_x86_64_unknown_linux_musl = "-D_LARGEFILE64_SOURCE"
