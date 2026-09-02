@@ -95,16 +95,17 @@ pub enum RaftStateError {
 impl RaftState {
     pub async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
         let persistent = RaftPersistentState::from_db(&pool).await?;
-        let key_bytes: [u8; PUBLIC_KEY_LENGTH] =
+        let key_bytes =
             query("SELECT value FROM keyvalue WHERE key='last_leader'")
                 .fetch_one(&pool)
                 .await?
-                .try_get::<Vec<u8>, &str>("value")?
-                .try_into()
-                .expect_or_log("Invalid leaderid in DB");
+                .try_get::<Vec<u8>, &str>("value")?;
         let role = if key_bytes.is_empty() {
             RaftRole::Initialized
         } else {
+            let key_bytes: [u8; PUBLIC_KEY_LENGTH] = key_bytes
+                .try_into()
+                .expect_or_log("Invalid leaderid in DB");
             let last_known_leader =
                 PeerId::from_bytes(&key_bytes).expect_or_log("Invalid last_known_leader in DB");
             RaftRole::Follower(last_known_leader)
