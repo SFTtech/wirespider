@@ -140,7 +140,7 @@ pub enum Cli {
 
 #[derive(Args, Debug)]
 pub struct CompletionCommand {
-    #[arg(help = "Shell type", value_parser = ["bash","elvish","fish","powershell","zsh"])]
+    #[arg(help = "Shell type")]
     pub shell: Shell,
 }
 

@@ -184,7 +184,7 @@ async fn build_node_image() -> Result<GenericImage> {
             r#"FROM docker.io/library/alpine:3.22
 RUN apk add --no-cache iproute2 wireguard-tools iputils
 COPY wirespider /usr/bin/wirespider
-RUN chmod +x /usr/bin/wirespider && wirespider --help > /dev/null
+RUN chmod +x /usr/bin/wirespider && wirespider --help > /dev/null && wirespider generate-completion bash > /dev/null
 "#
             .to_string(),
         )
