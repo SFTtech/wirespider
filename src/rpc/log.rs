@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqliteArguments;
 use sqlx::{sqlite::SqliteRow, SqlitePool};
 use tracing_unwrap::ResultExt;
 
@@ -86,15 +85,13 @@ impl Log {
     pub async fn store(&self, pool: &SqlitePool) -> Result<(), LogError> {
         let mut transaction = pool.begin().await?;
         query("DELETE FROM log").execute(&mut *transaction).await?;
-        let insert = pool
-            .prepare(r#"INSERT INTO log ("index", "term", "value") VALUES (?, ?, ?)"#)
-            .await?;
         for entry in &self.entries {
-            let mut args = SqliteArguments::default();
-            args.add(TryInto::<i64>::try_into(*entry.0).unwrap_or_log());
-            args.add(TryInto::<i64>::try_into(entry.1.term).unwrap_or_log());
-            args.add(to_string(&entry.1.data).unwrap_or_log());
-            insert.query_with(args).execute(&mut *transaction).await?;
+            query(r#"INSERT INTO log ("index", "term", "value") VALUES (?, ?, ?)"#)
+                .bind(TryInto::<i64>::try_into(*entry.0).unwrap_or_log())
+                .bind(TryInto::<i64>::try_into(entry.1.term).unwrap_or_log())
+                .bind(to_string(&entry.1.data).unwrap_or_log())
+                .execute(&mut *transaction)
+                .await?;
         }
         transaction.commit().await?;
         Ok(())
