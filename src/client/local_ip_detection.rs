@@ -46,7 +46,16 @@ async fn check_ip(
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.connect(dest).await?;
     let mut buffer = [0u8; 148]; // size from boringtun::noise::HANDSHAKE_INIT_SZ
-    let mut tun = pin!(Tunn::new(priv_key, pub_key, None, None, 1, None));
+                                 // boringtun uses its own re-export of x25519, convert our keys
+    let tun = Tunn::new(
+        boringtun::x25519::StaticSecret::from(priv_key.to_bytes()),
+        boringtun::x25519::PublicKey::from(*pub_key.as_bytes()),
+        None,
+        None,
+        1,
+        None,
+    );
+    let mut tun = pin!(tun);
     match tun.format_handshake_initiation(&mut buffer, false) {
         boringtun::noise::TunnResult::Err(_) => return Ok(None),
         boringtun::noise::TunnResult::WriteToNetwork(buf) => {

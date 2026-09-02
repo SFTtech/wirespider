@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_new_signed() {
-        let mut csprng = rand::rngs::OsRng {};
+        let mut csprng = rand::rng();
         let keypair = SigningKey::generate(&mut csprng);
         let test_string = "Test123123123";
         let signed = Signed::new(test_string.clone(), &keypair).unwrap();
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn test_from_signature() {
-        let mut csprng = rand::rngs::OsRng {};
+        let mut csprng = rand::rng();
         let signing_key = SigningKey::generate(&mut csprng);
         let test_string = "abcde";
         let serialized = serde_json::to_string(test_string).unwrap();

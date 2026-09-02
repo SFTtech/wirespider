@@ -8,7 +8,7 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 use ipnet::IpNet;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
-use rand::{rngs::OsRng, Rng};
+use rand::{Rng, RngExt};
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
@@ -52,7 +52,6 @@ pub async fn event_loop(
     start_opts: ClientStartCommand,
 ) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
-    let mut rng = OsRng::default();
     // delete the existing device, so we do not disturb the nat detection
     DefaultWireguardInterface::delete_device_if_exists(&start_opts.device).await;
     let backoff = backoff::ExponentialBackoffBuilder::new()
@@ -61,7 +60,7 @@ pub async fn event_loop(
 
     let port = start_opts
         .port
-        .unwrap_or_else(|| rng.gen_range(49152..=65535).try_into().unwrap());
+        .unwrap_or_else(|| rand::rng().random_range(49152..=65535).try_into().unwrap());
 
     let device_name = start_opts.device;
 
@@ -91,7 +90,7 @@ pub async fn event_loop(
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = StaticSecret::random_from_rng(OsRng::default());
+        let private_key = StaticSecret::random_from_rng(&mut rand::rng());
         tokio::fs::write(
             &start_opts.private_key,
             BASE64_STANDARD.encode(private_key.to_bytes()),

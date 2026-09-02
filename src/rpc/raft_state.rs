@@ -5,8 +5,7 @@ use super::ClusterState;
 use super::{log::LogEntry, PeerId};
 use ed25519_dalek::{SigningKey, PUBLIC_KEY_LENGTH};
 use futures::Future;
-use rand::rngs::OsRng;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, to_string};
 use sqlx::{prelude::*, query, SqlitePool};
@@ -95,17 +94,15 @@ pub enum RaftStateError {
 impl RaftState {
     pub async fn new(pool: SqlitePool) -> Result<RaftState, RaftStateError> {
         let persistent = RaftPersistentState::from_db(&pool).await?;
-        let key_bytes =
-            query("SELECT value FROM keyvalue WHERE key='last_leader'")
-                .fetch_one(&pool)
-                .await?
-                .try_get::<Vec<u8>, &str>("value")?;
+        let key_bytes = query("SELECT value FROM keyvalue WHERE key='last_leader'")
+            .fetch_one(&pool)
+            .await?
+            .try_get::<Vec<u8>, &str>("value")?;
         let role = if key_bytes.is_empty() {
             RaftRole::Initialized
         } else {
-            let key_bytes: [u8; PUBLIC_KEY_LENGTH] = key_bytes
-                .try_into()
-                .expect_or_log("Invalid leaderid in DB");
+            let key_bytes: [u8; PUBLIC_KEY_LENGTH] =
+                key_bytes.try_into().expect_or_log("Invalid leaderid in DB");
             let last_known_leader =
                 PeerId::from_bytes(&key_bytes).expect_or_log("Invalid last_known_leader in DB");
             RaftRole::Follower(last_known_leader)
@@ -140,8 +137,7 @@ impl RaftState {
 
 impl RaftPersistentState {
     pub fn new() -> RaftPersistentState {
-        let mut rng = OsRng {};
-        let signing_key = SigningKey::generate(&mut rng);
+        let signing_key = SigningKey::generate(&mut rand::rng());
         RaftPersistentState {
             signing_key,
             log: Log::default(),
@@ -238,7 +234,7 @@ impl Future for ElectionTimeout {
 impl ElectionTimeout {
     pub fn reset(&mut self) {
         let timeout = Duration::from_millis(
-            rand::thread_rng().gen_range(self.minimum_timeout_ms..self.maximum_timeout_ms),
+            rand::rng().random_range(self.minimum_timeout_ms..self.maximum_timeout_ms),
         );
         self.timer.as_mut().reset(
             Instant::now()
@@ -253,7 +249,7 @@ impl ElectionTimeout {
         //TODO: make this configurable
         let minimum = 1000;
         let maximum = 10000;
-        let duration = Duration::from_millis(rand::thread_rng().gen_range(minimum..maximum));
+        let duration = Duration::from_millis(rand::rng().random_range(minimum..maximum));
         ElectionTimeout {
             minimum_timeout_ms: minimum,
             maximum_timeout_ms: maximum,

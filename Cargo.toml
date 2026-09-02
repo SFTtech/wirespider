@@ -19,10 +19,10 @@ wireguard-uapi = "3"
 
 # netlink
 rtnetlink = "0.23"
-boringtun = {git = "https://github.com/cloudflare/boringtun.git", rev = "f672bb6c1e1e371240a8d151f15854687eb740bb"}
-x25519-dalek = { version = "2", features = ["serde"]}
-ed25519-dalek = { version = "2", features = ["serde", "rand_core"]}
-curve25519-dalek = { version = "4", features = ["serde"]}
+boringtun = "0.7"
+x25519-dalek = { version = "3", features = ["serde", "static_secrets"]}
+ed25519-dalek = { version = "3", features = ["serde", "rand_core"]}
+curve25519-dalek = { version = "5", features = ["serde"]}
 
 # grpc
 tonic = { version = "0.10", features = ["tls", "tls-webpki-roots"]}
@@ -42,7 +42,7 @@ serde_json = "1"
 #database
 sqlx = { version = "0.7", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
 base64 = "0.23"
-rand = { version = "0.8", features = ["getrandom"] }
+rand = "0.10"
 ipnet = { version = "2.4", features = ["serde"] }
 iprange = "0.6.7"
 advmac = "1"
