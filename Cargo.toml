@@ -41,7 +41,7 @@ serde_json = "1"
 
 #database
 sqlx = { version = "0.7", default-features = false, features = [ "runtime-tokio-rustls", "sqlite", "uuid", "migrate", "macros" ] }
-base64 = "0.21"
+base64 = "0.23"
 rand = { version = "0.8", features = ["getrandom"] }
 ipnet = { version = "2.4", features = ["serde"] }
 iprange = "0.6.7"
