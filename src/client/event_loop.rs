@@ -48,7 +48,7 @@ pub enum EventLoopError {
 }
 
 pub async fn event_loop(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     start_opts: ClientStartCommand,
 ) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
@@ -152,9 +152,12 @@ pub async fn event_loop(
     let monitor_interface = interface.clone();
     let monitor_client = client.clone();
     let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
-    subsys.start(SubsystemBuilder::new("monitor", move |subsys| {
-        monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "monitor",
+        async move |subsys: &mut SubsystemHandle| {
+            monitor.monitor(subsys, &CLIENT_STATE, monitor_client).await
+        },
+    ));
 
     let overlay_address_list = address_reply
         .overlay_ips

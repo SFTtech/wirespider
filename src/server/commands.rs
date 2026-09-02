@@ -49,10 +49,11 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
     env::set_var("DATABASE_URL", &opt.base.db.database_url);
     debug!("Starting");
 
-    Toplevel::new(move |s| async move {
-        s.start(SubsystemBuilder::new("TonicService", move |handle| {
-            tonic_service(handle, opt.bind)
-        }));
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
+        s.start(SubsystemBuilder::new(
+            "TonicService",
+            async move |handle: &mut SubsystemHandle| tonic_service(handle, opt.bind).await,
+        ));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_millis(1000))
@@ -61,7 +62,7 @@ pub async fn server_run(opt: ServerRunCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn tonic_service(subsys: SubsystemHandle, bind: SocketAddr) -> anyhow::Result<()> {
+async fn tonic_service(subsys: &mut SubsystemHandle, bind: SocketAddr) -> anyhow::Result<()> {
     let wirespider = WirespiderServer::new(WirespiderServerState::new().await?);
 
     info!("Starting Server on {:?}", bind);

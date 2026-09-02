@@ -41,7 +41,7 @@ impl<T: 'static + WireguardManagementInterface + Send> Monitor<T> {
 
     pub async fn monitor(
         self,
-        subsys: SubsystemHandle,
+        subsys: &mut SubsystemHandle,
         state: &ClientState,
         mut client: WirespiderClient<InterceptedService<Channel, WirespiderInterceptor>>,
     ) -> Result<(), MonitorError> {

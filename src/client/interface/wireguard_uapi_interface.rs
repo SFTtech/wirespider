@@ -174,9 +174,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
             builder = builder.and_then(|builder| builder.pref_source(src));
         }
         let route = builder
-            .map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-            })?
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?
             .build();
         self.rt_handle.route().add(route).execute().await?;
         Ok(())
@@ -190,9 +188,7 @@ impl WireguardManagementInterface for WireguardUapiInterface {
         let route = RouteMessageBuilder::<std::net::IpAddr>::new()
             .destination_prefix(network.addr(), network.prefix_len())
             .and_then(|builder| builder.gateway(via))
-            .map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-            })?
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?
             .build();
         self.rt_handle.route().del(route).execute().await?;
         Ok(())
@@ -232,7 +228,11 @@ impl Drop for WireguardUapiInterface {
         let handle = self.rt_handle.clone();
         let device_name = self.device_name.clone();
         tokio::spawn(async move {
-            let mut links = handle.link().get().match_name(device_name.clone()).execute();
+            let mut links = handle
+                .link()
+                .get()
+                .match_name(device_name.clone())
+                .execute();
             match links.try_next().await {
                 Ok(Some(link)) => {
                     if let Err(e) = handle
