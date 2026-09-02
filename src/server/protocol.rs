@@ -971,7 +971,7 @@ impl Wirespider for WirespiderServerState {
             .try_into()
             .map_err(|_| Status::invalid_argument("Invalid via address"))?;
 
-        let addressid: i64 = sqlx::query("SELECT addressid FROM addresses WHERE address=?")
+        let addressid: i64 = sqlx::query("SELECT addressid FROM addresses WHERE ip_address=?")
             .bind(via.to_string())
             .fetch_one(&self.sqlite_pool)
             .await
