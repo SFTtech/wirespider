@@ -1,7 +1,7 @@
 use super::interface_trait::OverlayManagementInterface;
 
+use advmac::MacAddr6;
 use ipnet::IpNet;
-use macaddr::MacAddr6;
 use std::{net::IpAddr, process::Command};
 use thiserror::Error;
 use tracing::debug;
@@ -37,7 +37,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "add",
             &device_name,
             "address",
-            &mac_addr.to_string(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "mtu",
             "1378",
             "type",
@@ -83,7 +85,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         let args = &[
             "fdb",
             "del",
-            &mac_addr.to_string(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -97,7 +101,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
         let args = &[
             "fdb",
             "add",
-            &mac_addr.to_string(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
             "self",
@@ -138,7 +144,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             "replace",
             &net.addr().to_string(),
             "lladdr",
-            &mac_addr.to_string(),
+            &mac_addr
+                .format_string(advmac::MacAddrFormat::ColonNotation)
+                .to_lowercase(),
             "dev",
             &self.device_name,
         ];
@@ -157,7 +165,9 @@ impl OverlayManagementInterface for OverlayCommandLineInterface {
             .args([
                 "fdb",
                 "del",
-                &mac_addr.to_string(),
+                &mac_addr
+                    .format_string(advmac::MacAddrFormat::ColonNotation)
+                    .to_lowercase(),
                 "dev",
                 &self.device_name,
             ])

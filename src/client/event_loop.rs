@@ -2,13 +2,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::{net::SocketAddr, time::Duration};
 
+use advmac::MacAddr6;
 use backoff::future::retry;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use ipnet::IpNet;
-use macaddr::MacAddr6;
 use network_interface::NetworkInterface;
 use network_interface::NetworkInterfaceConfig;
-use rand::{rngs::OsRng, Rng};
+use rand::RngExt;
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
@@ -48,20 +48,19 @@ pub enum EventLoopError {
 }
 
 pub async fn event_loop(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     start_opts: ClientStartCommand,
 ) -> Result<(), EventLoopError> {
     let mut client = connect(start_opts.connection).await?;
-    let mut rng = OsRng;
     // delete the existing device, so we do not disturb the nat detection
-    DefaultWireguardInterface::delete_device_if_exists(&start_opts.device);
+    DefaultWireguardInterface::delete_device_if_exists(&start_opts.device).await;
     let backoff = backoff::ExponentialBackoffBuilder::new()
         .with_max_interval(Duration::from_secs(60))
         .build();
 
     let port = start_opts
         .port
-        .unwrap_or_else(|| rng.gen_range(49152..=65535).try_into().unwrap());
+        .unwrap_or_else(|| rand::rng().random_range(49152..=65535).try_into().unwrap());
 
     let device_name = start_opts.device;
 
@@ -91,7 +90,7 @@ pub async fn event_loop(
             .unwrap();
         StaticSecret::from(secret_key_bytes)
     } else {
-        let private_key = StaticSecret::random_from_rng(OsRng);
+        let private_key = StaticSecret::random_from_rng(&mut rand::rng());
         tokio::fs::write(
             &start_opts.private_key,
             BASE64_STANDARD.encode(private_key.to_bytes()),
@@ -109,11 +108,10 @@ pub async fn event_loop(
     let local_ips = NetworkInterface::show()
         .unwrap_or_log()
         .into_iter()
-        .flat_map(|x| {
-            x.addr.into_iter().map(|x| match x {
-                network_interface::Addr::V4(x) => IpAddr::from(x.ip).into(),
-                network_interface::Addr::V6(x) => IpAddr::from(x.ip).into(),
-            })
+        .flat_map(|x| x.addr.into_iter())
+        .map(|x| match x {
+            network_interface::Addr::V4(addr) => IpAddr::from(addr.ip).into(),
+            network_interface::Addr::V6(addr) => IpAddr::from(addr.ip).into(),
         })
         .collect();
     debug!("local ips: {local_ips:?}");
@@ -146,15 +144,19 @@ pub async fn event_loop(
             Some(port),
             &address_list,
         )
+        .await
         .expect("Could not set up wireguard device"),
     ));
 
     let monitor_interface = interface.clone();
     let monitor_client = client.clone();
     let monitor = monitor::Monitor::new(monitor_interface, start_opts.monitor);
-    subsys.start(SubsystemBuilder::new("monitor", move |subsys| {
-        monitor.monitor(subsys, &CLIENT_STATE, monitor_client)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "monitor",
+        async move |subsys: &mut SubsystemHandle| {
+            monitor.monitor(subsys, &CLIENT_STATE, monitor_client).await
+        },
+    ));
 
     let overlay_address_list = address_reply
         .overlay_ips
@@ -166,7 +168,7 @@ pub async fn event_loop(
     let mut mac_bytes = Vec::with_capacity(6);
     mac_bytes.push(0xaa);
     mac_bytes.extend_from_slice(&PublicKey::from(&private_key).as_bytes().as_ref()[0..5]);
-    let mac_addr = MacAddr6::from(<&[u8] as TryInto<[u8; 6]>>::try_into(&mac_bytes).unwrap());
+    let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
     let overlay_interface = DefaultOverlayInterface::create_overlay_device(
         format!("{}-vxlan", device_name),
         &device_name,
@@ -220,7 +222,7 @@ pub async fn event_loop(
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&peer_pubkey.as_bytes()[0..5]);
-                                let mac_addr = MacAddr6::from(<&[u8] as TryInto<[u8; 6]>>::try_into(&mac_bytes).unwrap());
+                                let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
                                 let peer_port : u16 = peer.local_port.try_into().expect("Invalid port");
 
                                 let allowed_ips: Vec<IpNet> = peer
@@ -267,13 +269,14 @@ pub async fn event_loop(
                                     .lock()
                                     .await
                                     .set_peer(peer_pubkey, endpoint, keep_alive, &allowed_ips)
+                                    .await
                                     .unwrap_or_log();
                                 debug!("getting local ips");
                                 let local_sock_addrs = peer.local_ips.iter().map(|x| x.try_into().map(|x : IpAddr| SocketAddr::from((x, peer_port)))).collect::<Result<Vec<_>,_>>().unwrap_or_log();
                                 let local_endpoint = check_local_ips(&local_sock_addrs, private_key.clone(), peer_pubkey).await.unwrap_or_log();
                                 debug!("Got local endpoint: {:?}", local_endpoint);
                                 if local_endpoint.is_some() && local_endpoint != endpoint {
-                                    interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, local_endpoint, keep_alive, &allowed_ips).await.unwrap_or_log();
                                     create = true;
                                     // send a single packet to this peer to redo the handshake
                                     if let Ok(socket) = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED,0))).await {
@@ -291,8 +294,8 @@ pub async fn event_loop(
                                     // The monitor component will check for handshakes and if successfull handshakes are discovered
                                     // it will set the actual allowed ips.
                                     debug!("removing allowed ips");
-                                    interface.lock().await.remove_peer(peer_pubkey).unwrap_or_log();
-                                    interface.lock().await.set_peer(peer_pubkey, None, keep_alive, &[]).unwrap_or_log();
+                                    interface.lock().await.remove_peer(peer_pubkey).await.unwrap_or_log();
+                                    interface.lock().await.set_peer(peer_pubkey, None, keep_alive, &[]).await.unwrap_or_log();
                                 }
                                 let overlay_ip = peer.overlay_ips.into_iter().next();
                                 if let Some(dest_net) = overlay_ip {
@@ -307,9 +310,9 @@ pub async fn event_loop(
                                 let mut mac_bytes = Vec::with_capacity(6);
                                 mac_bytes.push(0xaa);
                                 mac_bytes.extend_from_slice(&pubkey.as_bytes()[0..5]);
-                                let mac_addr = MacAddr6::from(<&[u8] as TryInto<[u8; 6]>>::try_into(&mac_bytes).unwrap_or_log());
+                                let mac_addr = MacAddr6::new(mac_bytes.try_into().expect_or_log("Invalid mac size"));
                                 overlay_interface.remove_peer(mac_addr).unwrap_or_log();
-                                interface.lock().await.remove_peer(peer_pubkey).unwrap();
+                                interface.lock().await.remove_peer(peer_pubkey).await.unwrap();
                             }
                         },
                         Some(event::Target::Route(route)) => match event_type {
@@ -319,6 +322,7 @@ pub async fn event_loop(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),
                                     )
+                                    .await
                                     .unwrap();
                             }
                             EventType::Deleted => {
@@ -327,6 +331,7 @@ pub async fn event_loop(
                                         route.to.unwrap().try_into().unwrap(),
                                         route.via.unwrap().try_into().unwrap(),
                                     )
+                                    .await
                                     .unwrap();
                             }
                             _ => {
