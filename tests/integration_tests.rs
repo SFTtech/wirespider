@@ -228,6 +228,30 @@ async fn routes_are_programmed_on_all_clients() -> Result<()> {
         for node in &nodes {
             wait_for_route(node).await?;
         }
+
+        // deleting the route must remove it from the configuration of all
+        // nodes again
+        exec_ok(
+            &cluster.server,
+            &[
+                "wirespider",
+                "send-command",
+                "delete-route",
+                "--endpoint",
+                &format!("http://127.0.0.1:{SERVER_PORT}"),
+                "--token",
+                &cluster.admin_token,
+                "10.88.0.0/24",
+                ADMIN_IP,
+            ],
+            &[],
+        )
+        .await
+        .context("could not delete the route on the server")?;
+
+        for node in &nodes {
+            wait_until_route_removed(node).await?;
+        }
         Ok(())
     })
     .await
@@ -251,3 +275,20 @@ async fn wait_for_route(node: &Node) -> Result<()> {
     }
 }
 
+/// Wait until a node removed the route from its routing table again.
+async fn wait_until_route_removed(node: &Node) -> Result<()> {
+    let deadline = tokio::time::Instant::now() + HANDSHAKE_TIMEOUT;
+    loop {
+        let routes = node.routes().await?;
+        if !routes.contains("10.88.0.0/24") {
+            return Ok(());
+        }
+        if tokio::time::Instant::now() >= deadline {
+            bail!(
+                "{} did not remove the route within {HANDSHAKE_TIMEOUT:?}, routes:\n{routes}",
+                node.name
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}

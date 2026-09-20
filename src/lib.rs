@@ -1,20 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Version {
-    major: u16,
-    minor: u16,
-    patch: u16,
-}
-
-const WIRESPIDER_VERSION: Version = Version {
-    major: 0,
-    minor: 4,
-    patch: 0,
-};
-
 pub type WireguardKey = [u8; 32];
-
 
 pub mod protocol {
     #![allow(non_camel_case_types)]
