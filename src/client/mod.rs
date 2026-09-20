@@ -13,7 +13,7 @@ use crate::cli::{
     ClientStartCommand, ConnectionOptions,
 };
 use crate::client::event_loop::event_loop;
-use base64::prelude::{Engine, BASE64_STANDARD};
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 use client_state::ClientState;
 use interface::{DefaultOverlayInterface, DefaultWireguardInterface};
 use lazy_static::lazy_static;
@@ -168,11 +168,16 @@ pub async fn client_manage(manage_opts: ClientManageCommand) -> anyhow::Result<(
                     unreachable!()
                 };
 
+                let what = if let Some(owner) = change.owner {
+                    change_peer_request::What::Owner(owner)
+                } else if let Some(endpoint) = change.new_endpoint {
+                    change_peer_request::What::Endpoint(endpoint.into())
+                } else {
+                    unreachable!("clap requires --owner or --new-endpoint")
+                };
                 let request = ChangePeerRequest {
                     id: Some(id),
-                    what: Some(change_peer_request::What::Endpoint(
-                        change.new_endpoint.into(),
-                    )),
+                    what: Some(what),
                 };
                 let mut client = connect(change.connection).await?;
                 let result = client.change_peer(request).await?;

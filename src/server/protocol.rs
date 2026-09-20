@@ -1,106 +1,96 @@
-use futures::future::join_all;
-use futures::Stream;
-use ipnet::{IpNet, Ipv4Net, Ipv6Net};
-use iprange::IpRange;
-use sqlx::error::Error as SqlxError;
-use sqlx::prelude::*;
-use sqlx::sqlite::SqlitePool;
-use std::borrow::BorrowMut;
-use std::collections::HashSet;
-use std::{
-    borrow::Borrow,
-    cmp::max,
-    collections::{HashMap, VecDeque},
-    convert::TryInto,
-    mem,
-    net::{IpAddr, SocketAddr},
-    pin::Pin,
-    str::FromStr,
-    sync::atomic::{AtomicU64, Ordering::Relaxed},
-    usize,
-};
-use std::{cmp, env};
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::sync::RwLock;
-use tracing_unwrap::ResultExt;
-use uuid::Uuid;
-use wirespider::WireguardKey;
+//! The client-facing gRPC service, backed by the raft cluster.
+//!
+//! All state changes go through the raft log (`client_write`); reads are
+//! served from the applied state machine. On the leader reads are
+//! linearizable (`ensure_linearizable`); on a learner they are eventually
+//! consistent by design.
 
-use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
+use futures::Stream;
+use sqlx::sqlite::SqliteConnection;
+use sqlx::SqlitePool;
+use std::collections::HashSet;
+use std::convert::TryInto;
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use tonic::metadata::MetadataMap;
+use tonic::Code;
+use tonic::Request;
+use tonic::Response;
+use tonic::Status;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::instrument;
+use uuid::Uuid;
 
 use wirespider::protocol::wirespider_server::Wirespider;
-
 use wirespider::protocol::*;
+use wirespider::WireguardKey;
 
-//logging
-use tracing::{debug, error, info, instrument};
-
-//iterators
-use itertools::Itertools;
-
-const EVENT_DEQUE_MAX_CAPACITY: usize = 1000;
+use wirespider::raft::entry::Mutation;
+use wirespider::raft::event_hub::EventHub;
+use wirespider::raft::raft_handle::RaftHandle;
+use wirespider::raft::state_reader;
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Status>> + Send + Sync>>;
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub struct WirespiderServerState {
     sqlite_pool: SqlitePool,
-    event_listeners: RwLock<HashMap<i64, Sender<Result<Event, Status>>>>,
-    event_list: RwLock<VecDeque<Event>>,
-    current_eventid: AtomicU64,
+    raft: RaftHandle,
+    events: Arc<EventHub>,
 }
 
 #[derive(Debug)]
 struct AuthenticatedPeer {
     peerid: i64,
     permissions: i32,
-    nat_type: i32,
-    monitor: bool,
-    relay: bool,
+    user_id: Option<i64>,
 }
 
-trait TracingIntoStatusExt<T> {
-    fn into_status(self) -> Result<T, Status>;
-}
-
-impl<T> TracingIntoStatusExt<T> for Result<T, SqlxError> {
-    fn into_status(self) -> Result<T, Status> {
-        match self {
-            Err(sql_error) => {
-                error!("SQL Error: {:?}", sql_error);
-                Err(Status::internal("SQL Error"))
-            }
-            Ok(x) => Ok(x),
+/// Convert a raft client write error into a tonic status, mapping
+/// ForwardToLeader to UNAVAILABLE with the leader address hint.
+fn write_error_to_status(
+    e: openraft::error::RaftError<
+        wirespider::raft::NodeId,
+        openraft::error::ClientWriteError<wirespider::raft::NodeId, openraft::BasicNode>,
+    >,
+) -> Status {
+    match e.forward_to_leader() {
+        Some(forward) => {
+            let leader = forward
+                .leader_node
+                .as_ref()
+                .map(|n| n.addr.clone())
+                .unwrap_or_default();
+            Status::unavailable(format!("not leader; leader at: {leader}"))
+        }
+        None => {
+            error!("raft write error: {e:?}");
+            Status::internal(format!("raft error: {e}"))
         }
     }
 }
 
-async fn send_event_to_single_peer(
-    peerid: i64,
-    sender: &Sender<Result<Event, Status>>,
-    event: Event,
-) -> Result<(), i64> {
-    if let Err(_err) = sender.send(Ok(event.clone())).await {
-        return Err(peerid);
-    }
-    Ok(())
-}
-
 impl WirespiderServerState {
-    #[instrument]
-    pub async fn new() -> Result<WirespiderServerState, SqlxError> {
-        let sqlite_pool =
-            SqlitePool::connect(&env::var("DATABASE_URL").expect("Please set DATABASE_URL"))
-                .await?;
+    #[instrument(skip_all)]
+    pub async fn new(
+        sqlite_pool: SqlitePool,
+        raft: RaftHandle,
+        events: Arc<EventHub>,
+    ) -> Result<WirespiderServerState, sqlx::Error> {
         Ok(WirespiderServerState {
             sqlite_pool,
-            event_listeners: RwLock::default(),
-            event_list: RwLock::default(),
-            current_eventid: AtomicU64::new(1),
+            raft,
+            events,
         })
     }
 
-    #[instrument]
+    #[instrument(skip_all)]
     async fn authenticate(
         &self,
         metadata: &MetadataMap,
@@ -119,355 +109,272 @@ impl WirespiderServerState {
         let (_, token) = auth_str.split_at(7);
         let uuid = Uuid::from_str(token)
             .map_err(|_| Status::permission_denied("Invalid authorization"))?;
+        let mut conn = self.sqlite_pool.acquire().await.map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })?;
         let result = sqlx::query(
-            r#"SELECT peerid,permissions,nat_type,monitor,relay FROM peers WHERE token=?"#,
+            r#"SELECT p.peerid, p.permissions, p.user_id FROM peers p WHERE p.token=?"#,
         )
         .bind(uuid)
-        .fetch_one(&self.sqlite_pool)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|_| Status::permission_denied("Invalid authorization"))?;
         if result.get::<i32, &str>("permissions") >= permission_level {
             Ok(AuthenticatedPeer {
                 peerid: result.get("peerid"),
                 permissions: result.get("permissions"),
-                nat_type: result.get("nat_type"),
-                monitor: result.get("monitor"),
-                relay: result.get("relay"),
+                user_id: result.get("user_id"),
             })
         } else {
             Err(Status::permission_denied("Insufficient Permissions"))
         }
     }
 
-    #[instrument]
-    async fn get_peerid_from_identifier(&self, id: PeerIdentifier) -> Result<i64, Status> {
-        match id.identifier {
-            Some(peer_identifier::Identifier::Name(name)) => {
-                let result = sqlx::query(r#"SELECT peerid FROM peers WHERE peer_name=?"#)
-                    .bind(name)
-                    .fetch_one(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-                result.try_get("peerid").into_status()
-            }
-            Some(peer_identifier::Identifier::Token(token)) => {
-                let result = sqlx::query(r#"SELECT peerid FROM peers WHERE token=?"#)
-                    .bind(Uuid::from_bytes(
-                        token
-                            .try_into()
-                            .map_err(|_| Status::invalid_argument("Invalid token"))?,
-                    ))
-                    .fetch_one(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-                result.try_get("peerid").into_status()
-            }
-            Some(peer_identifier::Identifier::PublicKey(key)) => {
-                let result = sqlx::query(r#"SELECT peerid FROM peers WHERE pubkey=?"#)
-                    .bind(key)
-                    .fetch_one(&self.sqlite_pool)
-                    .await
-                    .map_err(|_| Status::permission_denied("Invalid authorization"))?;
-                result.try_get("peerid").into_status()
-            }
-            _ => Err(Status::invalid_argument("Missing identifier")),
-        }
+    /// The user owning this node, for permission-cap and ownership checks.
+    async fn owner_user_id(&self, peerid: i64) -> Result<Option<i64>, Status> {
+        let mut conn = self.conn().await?;
+        let row = sqlx::query(r#"SELECT user_id FROM peers WHERE peerid=?"#)
+            .bind(peerid)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })?;
+        row.try_get("user_id").map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })
     }
 
-    #[instrument]
-    async fn get_peer_from_peerid(&self, peerid: i64) -> Result<Option<Peer>, Status> {
-        let peer_data = sqlx::query(
-            r#"SELECT peer_name,pubkey,current_endpoint,nat_type,monitor,relay,local_ips,local_port FROM peers WHERE peerid=?"#,
-        )
-        .bind(peerid)
-        .fetch_one(&self.sqlite_pool)
-        .await
-        .map_err(|_| {
-            Status::internal(
-                "SQL error: Could not get peer from peerid",
-            )
-        })?;
-        let pubkey: Option<Vec<u8>> = peer_data.get("pubkey");
-        if pubkey.is_none() {
+    /// The id of a user by name.
+    async fn lookup_user_id(&self, name: &str) -> Result<i64, Status> {
+        let mut conn = self.conn().await?;
+        let row = sqlx::query(r#"SELECT userid FROM users WHERE user_name=?"#)
+            .bind(name)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|_| Status::invalid_argument("User not found"))?;
+        row.try_get("userid").map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })
+    }
+
+    /// If this node is not the leader but knows one, connect to the leader
+    /// and invoke `call` with a client carrying the caller's auth metadata.
+    /// Returns the leader's response. `Ok(None)` means "handle locally".
+    ///
+    /// The forwarding node never elevates privileges: the leader
+    /// re-authenticates the original caller.
+    async fn forward_with<R>(
+        &self,
+        metadata: tonic::metadata::MetadataMap,
+        call: impl FnOnce(
+            wirespider::protocol::wirespider_client::WirespiderClient<tonic::transport::Channel>,
+            tonic::metadata::MetadataMap,
+        ) -> futures::future::BoxFuture<'static, Result<Response<R>, Status>>,
+    ) -> Result<Option<Response<R>>, Status>
+    where
+        R: prost::Message + Default + 'static,
+    {
+        let metrics = self.raft.raft.metrics().borrow().clone();
+        let Some(leader_id) = metrics.current_leader else {
+            return Ok(None);
+        };
+        if leader_id == metrics.id {
             return Ok(None);
         }
-        let endpoint_unparsed: Option<String> = peer_data.get("current_endpoint");
-        let endpoint = match endpoint_unparsed {
-            Some(data) => Some(
-                data.parse()
-                    .map_err(|_| Status::internal("Endpoint error"))?,
-            ),
-            None => None,
+        let Some(addr) = metrics
+            .membership_config
+            .membership()
+            .get_node(&leader_id)
+            .map(|n| n.addr.clone())
+        else {
+            return Ok(None);
         };
-        let pubkey: WireguardKey = pubkey
-            .unwrap()
-            .try_into()
-            .map_err(|_| Status::internal("Key error"))?;
-
-        let allowed_ips = self
-            .get_allowed_ips(peerid)
+        let channel = tonic::transport::Channel::from_shared(format!("http://{addr}"))
+            .map_err(|e| Status::internal(e.to_string()))?
+            .connect()
             .await
-            .map_err(|_| Status::internal("allowed IP error"))?;
-
-        let overlay_ips = self
-            .get_overlay_ips(peerid)
-            .await
-            .map_err(|_| Status::internal("overlay IP error"))?;
-
-        let tunnel_ips = self
-            .get_tunnel_ips(peerid)
-            .await
-            .map_err(|_| Status::internal("tunnel IP error"))?;
-
-        let local_ips = peer_data
-            .get::<&str, &str>("local_ips")
-            .split(',')
-            .filter(|x| !x.is_empty())
-            .map(IpAddr::from_str)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| Status::internal("local IP error"))?;
-
-        let peer_builder = Peer::builder()
-            .wg_public_key(pubkey)
-            .name(peer_data.get("peer_name"))
-            .endpoint(endpoint)
-            .tunnel_ips(tunnel_ips)
-            .allowed_ips(allowed_ips)
-            .overlay_ips(overlay_ips)
-            .node_flags(peer_data.get("monitor"), peer_data.get("relay"))
-            .nat_type(peer_data.get("nat_type"))
-            .local_ips(local_ips)
-            .local_port(peer_data.get("local_port"));
-        Ok(Some(peer_builder.build()))
+            .map_err(|e| Status::unavailable(format!("leader at {addr} unreachable: {e}")))?;
+        let client = wirespider::protocol::wirespider_client::WirespiderClient::new(channel);
+        let fut = call(client, metadata);
+        let response = fut.await?;
+        Ok(Some(response))
     }
 
-    #[instrument]
-    async fn send_event(&self, event: Event) -> () {
-        let disconnected_peers: Vec<i64> = {
-            let listener_guard = self.event_listeners.read().await;
-            let mut join_handles = Vec::new();
-            for (&peerid, sender) in listener_guard.borrow().iter() {
-                join_handles.push(send_event_to_single_peer(peerid, sender, event.clone()));
-            }
-            join_all(join_handles).await
-        }
-        .into_iter()
-        .filter_map(Result::err)
-        .collect();
-        if !disconnected_peers.is_empty() {
-            let mut listener_guard = self.event_listeners.write().await;
-            for x in disconnected_peers {
-                listener_guard.borrow_mut().remove(&x);
-            }
-        }
-        // TODO: remove peer from routing?
+    #[instrument(skip_all)]
+    async fn get_peerid_from_identifier(&self, id: PeerIdentifier) -> Result<i64, Status> {
+        let mut conn = self.conn().await?;
+        get_peerid_from_identifier(&mut conn, id).await
     }
 
-    #[instrument]
-    async fn send_peer_event(&self, event_type: EventType, peer: Peer) -> () {
-        let mut lockguard = self.event_list.write().await;
-        let eventid = self.current_eventid.fetch_add(1, Relaxed);
-        let event = Event::from_peer(eventid, event_type, peer);
-        lockguard.push_back(event.clone());
-        while lockguard.len() > EVENT_DEQUE_MAX_CAPACITY {
-            lockguard.pop_front();
-        }
-        mem::drop(lockguard);
-        self.send_event(event).await;
+    async fn conn(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>, Status> {
+        self.sqlite_pool.acquire().await.map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })
     }
 
-    #[instrument]
-    async fn send_route_event(&self, event_type: EventType, route: Route) -> () {
-        let mut lockguard = self.event_list.write().await;
-        let eventid = self.current_eventid.fetch_add(1, Relaxed);
-        let event = Event::from_route(eventid, event_type, route);
-        lockguard.push_back(event.clone());
-        while lockguard.len() > EVENT_DEQUE_MAX_CAPACITY {
-            lockguard.pop_front();
-        }
-        mem::drop(lockguard);
-        self.send_event(event).await;
-    }
-
-    #[instrument]
-    async fn get_initial_events(
+    /// A gRPC client for the current leader, for forwarding write requests
+    /// from a learner replica. None if the leader is unknown.
+    async fn leader_client(
         &self,
-        auth_peer: &AuthenticatedPeer,
-    ) -> Result<Vec<Event>, Status> {
-        let mut events = Vec::new();
-        let results = sqlx::query(r#"SELECT peerid, peer_name, pubkey, current_endpoint, nat_type, monitor, relay, local_ips, local_port FROM peers WHERE peerid!=? AND pubkey IS NOT NULL"#)
-            .bind(auth_peer.peerid)
-            .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("sql error"))?;
-
-        for result in results {
-            let pubkey: Vec<u8> = result.get("pubkey");
-            let allowed_ips = self.get_allowed_ips(result.get("peerid")).await?;
-            let overlay_ips = self.get_overlay_ips(result.get("peerid")).await?;
-            let tunnel_ips = self.get_tunnel_ips(result.get("peerid")).await?;
-            let local_ips = result
-                .get::<&str, &str>("local_ips")
-                .split(',')
-                .filter(|x| !x.is_empty())
-                .map(IpAddr::from_str)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|_| Status::internal("local IP error"))?;
-            let peer_builder = Peer::builder()
-                .wg_public_key(
-                    pubkey
-                        .as_slice()
-                        .try_into()
-                        .map_err(|_| Status::internal("Invalid pubkey"))?,
-                )
-                .name(result.get("peer_name"))
-                .endpoint(
-                    result
-                        .try_get("current_endpoint")
-                        .ok()
-                        .and_then(|x| SocketAddr::from_str(x).ok()),
-                ) //TODO: use current endpoint IP if connected via wireguard to server);
-                .tunnel_ips(tunnel_ips)
-                .allowed_ips(allowed_ips)
-                .overlay_ips(overlay_ips)
-                .node_flags(result.get("monitor"), result.get("relay"))
-                .nat_type(result.get("nat_type"))
-                .local_ips(local_ips)
-                .local_port(result.get("local_port"));
-            events.push(Event::from_peer(0, EventType::New, peer_builder.build()));
+    ) -> Result<
+        Option<
+            wirespider::protocol::wirespider_client::WirespiderClient<tonic::transport::Channel>,
+        >,
+        Status,
+    > {
+        let metrics = self.raft.raft.metrics().borrow().clone();
+        let Some(leader_id) = metrics.current_leader else {
+            return Ok(None);
+        };
+        // the leader is this node: no forwarding needed (callers check id first)
+        if leader_id == metrics.id {
+            return Ok(None);
         }
-        info!("Events: {:?}", events);
-
-        events.extend(
-            sqlx::query(
-                r#"
-            SELECT r.destination,a.ip_address FROM routes r
-            LEFT JOIN addresses a USING(addressid)
-            LEFT JOIN peers p USING(peerid)
-            WHERE a.peerid!=? AND p.pubkey IS NOT NULL"#,
-            )
-            .bind(auth_peer.peerid)
-            .fetch_all(&self.sqlite_pool)
+        let Some(addr) = metrics
+            .membership_config
+            .membership()
+            .get_node(&leader_id)
+            .map(|n| n.addr.clone())
+        else {
+            return Ok(None);
+        };
+        let channel = tonic::transport::Channel::from_shared(format!("http://{addr}"))
+            .map_err(|e| Status::internal(e.to_string()))?
+            .connect()
             .await
-            .map_err(|_| Status::internal("SQL error when getting routes"))?
-            .into_iter()
-            .map(|x| {
-                Route::new(
-                    str::parse(x.get("destination")).unwrap(),
-                    str::parse(x.get("ip_address")).unwrap(),
-                )
-            })
-            .map(|route| Event::from_route(0, EventType::New, route)),
-        );
-
-        info!("Events: {:?}", events);
-
-        Ok(events)
+            .map_err(|e| Status::unavailable(format!("leader at {addr} unreachable: {e}")))?;
+        Ok(Some(
+            wirespider::protocol::wirespider_client::WirespiderClient::new(channel),
+        ))
     }
 
-    #[instrument]
-    async fn get_overlay_ips(&self, peerid: i64) -> Result<Vec<IpNet>, Status> {
-        let results = sqlx::query(r#"SELECT a.ip_address, n.network FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? AND n.network_type='vxlan'"#)
-            .bind(peerid)
-            .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
-        let mut final_addresses = Vec::new();
-        for result in results {
-            let net = IpNet::from_str(result.get("network"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?;
-            let address = IpAddr::from_str(result.get("ip_address"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
-            if net.contains(&address) {
-                final_addresses.push(match (&net, &address) {
-                    (IpNet::V4(net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, net.prefix_len())
-                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                        .into(),
-                    (IpNet::V6(net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, net.prefix_len())
-                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                        .into(),
-                    _ => unreachable!(),
-                });
-            }
-        }
-        Ok(final_addresses)
-    }
-
-    #[instrument]
-    async fn get_tunnel_ips(&self, peerid: i64) -> Result<Vec<IpAddr>, Status> {
-        let results = sqlx::query(r#"SELECT ip_address FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? AND n.network_type='wireguard'"#)
-            .bind(peerid)
-            .fetch_all(&self.sqlite_pool)
-            .await
-            .map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
-        Ok(results
-            .into_iter()
-            .map(|x| IpAddr::from_str(x.get("ip_address")).unwrap_or_log())
-            .collect())
-    }
-
-    #[instrument]
-    async fn get_allowed_ips(&self, peerid: i64) -> Result<Vec<IpNet>, Status> {
-        let results = sqlx::query(r#"SELECT a.ip_address, p.nat_type, p.monitor, p.relay, n.network FROM addresses a LEFT JOIN networks n USING(networkid) LEFT JOIN peers p USING(peerid) WHERE a.peerid=? AND n.network_type='wireguard'"#)
-            .bind(peerid)
-            .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get allowed ips"))?;
-        let mut final_addresses = Vec::new();
-        for result in results {
-            let net = IpNet::from_str(result.get("network"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?;
-            let address = IpAddr::from_str(result.get("ip_address"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
-            if net.contains(&address) {
-                if result.get("monitor") || result.get("relay") {
-                    final_addresses.push(net)
-                } else {
-                    final_addresses.push(match (&net, &address) {
-                        (IpNet::V4(_net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, 32)
-                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                            .into(),
-                        (IpNet::V6(_net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, 128)
-                            .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                            .into(),
-                        _ => unreachable!(),
-                    });
-                }
-            }
-        }
-        let route_ips = sqlx::query(
-            r#"
-        SELECT destination FROM routes
-            LEFT JOIN addresses a USING(addressid)
-            WHERE a.peerid=?"#,
+    /// Read the applied state of a peer (self reported columns).
+    async fn peer_state(
+        &self,
+        peerid: i64,
+    ) -> Result<
+        Option<(
+            Option<Vec<u8>>,
+            Option<String>,
+            i32,
+            bool,
+            bool,
+            Option<String>,
+            Option<i64>,
+        )>,
+        Status,
+    > {
+        let mut conn = self.conn().await?;
+        let row = sqlx::query(
+            "SELECT pubkey, current_endpoint, nat_type, monitor, relay, local_ips, local_port FROM peers WHERE peerid=?",
         )
         .bind(peerid)
-        .fetch_all(&self.sqlite_pool)
+        .fetch_optional(&mut *conn)
         .await
-        .into_status()?;
-
-        Ok(final_addresses
-            .into_iter()
-            .chain(
-                // Also allow route destinations (allow reverse path)
-                route_ips
-                    .into_iter()
-                    .filter_map(|x| str::parse(x.get("destination")).ok()),
+        .map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })?;
+        Ok(row.map(|row| {
+            (
+                row.try_get("pubkey").ok().flatten(),
+                row.try_get("current_endpoint").ok().flatten(),
+                row.try_get("nat_type").unwrap_or(0),
+                row.try_get("monitor").unwrap_or(false),
+                row.try_get("relay").unwrap_or(false),
+                row.try_get("local_ips").ok().flatten(),
+                row.try_get("local_port").ok().flatten(),
             )
-            .collect())
+        }))
+    }
+}
+
+async fn get_peerid_from_identifier(
+    conn: &mut SqliteConnection,
+    id: PeerIdentifier,
+) -> Result<i64, Status> {
+    match id.identifier {
+        Some(peer_identifier::Identifier::Name(name)) => {
+            let result = sqlx::query(r#"SELECT peerid FROM peers WHERE peer_name=?"#)
+                .bind(name)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|_| Status::invalid_argument("Peer not found"))?;
+            result.try_get("peerid").map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })
+        }
+        Some(peer_identifier::Identifier::Token(token)) => {
+            let result = sqlx::query(r#"SELECT peerid FROM peers WHERE token=?"#)
+                .bind(Uuid::from_bytes(
+                    token
+                        .try_into()
+                        .map_err(|_| Status::invalid_argument("Invalid token"))?,
+                ))
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|_| Status::permission_denied("Invalid authorization"))?;
+            result.try_get("peerid").map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })
+        }
+        Some(peer_identifier::Identifier::PublicKey(key)) => {
+            let result = sqlx::query(r#"SELECT peerid FROM peers WHERE pubkey=?"#)
+                .bind(key)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|_| Status::permission_denied("Invalid authorization"))?;
+            result.try_get("peerid").map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })
+        }
+        _ => Err(Status::invalid_argument("Missing identifier")),
+    }
+}
+
+use sqlx::Row as _;
+
+/// Copy the authorization metadata onto a forwarded request so the receiving
+/// node authenticates the original caller.
+fn forward_metadata<T>(metadata: &MetadataMap, request: &mut Request<T>) {
+    for key in ["Authorization"] {
+        if let Some(value) = metadata.get(key) {
+            if let Ok(v) = value.to_str() {
+                request.metadata_mut().insert(key, v.parse().unwrap());
+            }
+        }
     }
 }
 
 #[tonic::async_trait]
 impl Wirespider for WirespiderServerState {
     type getEventsStream = EventStream;
-    #[instrument]
+
+    /// Hot path: authenticate, diff the self-reported state against the
+    /// applied state, and if anything changed submit one raft write. Then
+    /// read the allowed addresses from the applied state (linearizable on
+    /// the leader).
+    #[instrument(skip(self, request))]
     async fn get_addresses(
         &self,
         request: Request<AddressRequest>,
     ) -> Result<Response<AddressReply>, Status> {
-        let mut auth_peer = self.authenticate(request.metadata(), 0).await?;
-        let mut updated = false;
-        let mut eventtype = EventType::Changed;
+        let request_metadata = request.metadata().clone();
+        let auth_peer = self.authenticate(request.metadata(), 0).await?;
+        let request = request.get_ref();
 
-        let requested_nat_type = NatType::try_from(request.get_ref().nat_type)
+        let requested_nat_type = NatType::try_from(request.nat_type)
             .map_err(|_| Status::invalid_argument("Invalid NatType"))?;
         let requested_node_flags = request
-            .get_ref()
             .node_flags
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("Invalid NodeType"))?;
@@ -478,353 +385,303 @@ impl Wirespider for WirespiderServerState {
             return Err(Status::permission_denied("Not allowed to relay"));
         }
 
-        if auth_peer.nat_type != requested_nat_type.into() {
-            updated = true;
-            auth_peer.nat_type = requested_nat_type.into();
-        }
-
-        if auth_peer.monitor != requested_node_flags.monitor {
-            updated = true;
-            auth_peer.monitor = requested_node_flags.monitor;
-        }
-
-        if auth_peer.relay != requested_node_flags.relay {
-            updated = true;
-            auth_peer.relay = requested_node_flags.relay;
-        }
-
-        if request.get_ref().wg_public_key.len() != 32 {
+        if request.wg_public_key.len() != 32 {
             return Err(Status::new(Code::InvalidArgument, "Wrong key length"));
         }
         let publickey: WireguardKey = request
-            .get_ref()
             .wg_public_key
             .clone()
             .try_into()
             .map_err(|_| Status::internal("invalid key"))?;
 
         let local_port: u16 = request
-            .get_ref()
             .local_port
             .try_into()
             .map_err(|_| Status::invalid_argument("Invalid local port"))?;
 
-        // TODO: do not allow updating key to be the same as an existing entry
-        debug!("getting peer data");
-        let peer_query = sqlx::query(
-            r#"SELECT pubkey, current_endpoint, local_ips, local_port, nat_type FROM peers WHERE peerid=?"#,
-        )
-        .bind(auth_peer.peerid)
-        .fetch_one(&self.sqlite_pool)
-        .await
-        .into_status()?;
-        let old_pubkey = peer_query.get::<Option<&[u8]>, &str>("pubkey");
-        if old_pubkey != Some(&publickey[0..32]) {
-            debug!("updating peer data");
-            updated = true;
-            eventtype = EventType::New;
-            if old_pubkey.is_some() {
-                //delete the old peer
-                let peer = self
-                    .get_peer_from_peerid(auth_peer.peerid)
-                    .await?
-                    .ok_or_else(|| Status::internal("peer deleted"))?;
-                self.send_peer_event(EventType::Deleted, peer.clone()).await;
-            }
-            //update database
-            sqlx::query(
-                r#"UPDATE peers SET pubkey=?, nat_type=?, relay=?, monitor=?  WHERE peerid=?"#,
-            )
-            .bind(&publickey[0..32])
-            .bind(auth_peer.nat_type)
-            .bind(auth_peer.relay)
-            .bind(auth_peer.monitor)
-            .bind(auth_peer.peerid)
-            .execute(&self.sqlite_pool)
-            .await
-            .into_status()?;
-        }
+        // diff current applied state vs. the request
+        let (old_pubkey, old_endpoint, old_nat, old_monitor, old_relay, old_local_ips, old_port) =
+            self.peer_state(auth_peer.peerid)
+                .await?
+                .ok_or_else(|| Status::permission_denied("Invalid authorization"))?;
 
-        debug!("checking local_port");
-        let old_local_port = peer_query
-            .try_get::<u16, &str>("local_port")
-            .into_status()?;
-        if old_local_port != local_port {
-            // no need to send update to peers, so do not set updated flag
-            sqlx::query(r#"UPDATE peers SET local_port=? WHERE peerid=?"#)
-                .bind(local_port)
-                .bind(auth_peer.peerid)
-                .execute(&self.sqlite_pool)
-                .await
-                .into_status()?;
-        }
-        let old_endpoint = peer_query
-            .get::<Option<&str>, &str>("current_endpoint")
-            .and_then(|x| SocketAddr::from_str(x).ok());
-        let new_enpoint = request
-            .get_ref()
+        let endpoint: Option<String> = request
             .endpoint
             .clone()
-            .and_then(|x| x.try_into().ok());
-        if let Some(endpoint) = new_enpoint {
-            if Some(endpoint) != old_endpoint {
-                updated = true;
-                let endpoint = endpoint.to_string();
-                //update database
-                sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
-                    .bind(endpoint)
-                    .bind(auth_peer.peerid)
-                    .execute(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-            }
-        }
-
-        let old_nat_type = NatType::try_from(peer_query.get::<i32, &str>("nat_type"));
-        let new_nat_type = request.get_ref().nat_type;
-
-        if let Ok(old_nat_type) = old_nat_type {
-            if new_nat_type != old_nat_type as i32 {
-                updated = true;
-                //update database
-                sqlx::query(r#"UPDATE peers SET nat_type=? WHERE peerid=?"#)
-                    .bind(new_nat_type)
-                    .bind(auth_peer.peerid)
-                    .execute(&self.sqlite_pool)
-                    .await
-                    .into_status()?;
-            }
-        }
-
-        // local ips
-        debug!("checking local_ips");
-        let old_local_ips = peer_query
-            .get::<&str, &str>("local_ips")
-            .split(',')
-            .filter(|x| !x.is_empty()) // do not try to map empty strings
-            .map(IpAddr::from_str)
-            .collect::<Result<HashSet<IpAddr>, _>>()
-            .map_err(|_| Status::internal("Invalid local ip (internal server error)"))?;
-        let mut new_local_ips = request
-            .get_ref()
+            .and_then(|x| x.try_into().ok())
+            .map(|s: SocketAddr| s.to_string());
+        let local_ips: Vec<IpAddr> = request
             .local_ips
             .iter()
             .map(|x| x.try_into())
-            .collect::<Result<HashSet<IpAddr>, _>>()
+            .collect::<Result<Vec<IpAddr>, _>>()
             .map_err(|_| Status::internal("Invalid local ip provided"))?;
-        let mut ip4range = IpRange::new();
-        let mut ip6range = IpRange::new();
 
-        let results = sqlx::query(r#"SELECT a.ip_address, n.network FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? and n.network_type='wireguard'"#)
-            .bind(auth_peer.peerid)
-            .fetch_all(&self.sqlite_pool).await.map_err(|_| Status::internal("SQL error: Could not get addresses"))?;
-        let mut final_addresses = Vec::new();
-        for result in results {
-            let net = IpNet::from_str(result.get("network"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?;
+        let pubkey_changed = old_pubkey.as_deref() != Some(&publickey[..]);
+        let state_changed = old_endpoint != endpoint
+            || old_nat != requested_nat_type as i32
+            || old_monitor != requested_node_flags.monitor
+            || old_relay != requested_node_flags.relay;
+        let old_ips_set: HashSet<IpAddr> = old_local_ips
+            .unwrap_or_default()
+            .split(',')
+            .filter(|x| !x.is_empty())
+            .filter_map(|x| IpAddr::from_str(x).ok())
+            .collect();
+        let new_ips_set: HashSet<IpAddr> = local_ips.iter().copied().collect();
+        let ips_changed = old_ips_set != new_ips_set;
+        let port_changed = old_port != Some(local_port as i64);
 
-            match net {
-                IpNet::V4(net) => {
-                    ip4range.add(net);
-                }
-                IpNet::V6(net) => {
-                    ip6range.add(net);
-                }
+        debug!(
+            pubkey_changed,
+            state_changed, ips_changed, port_changed, "checking peer update"
+        );
+
+        // Only write when something actually changed: an unchanged reconnect
+        // costs zero log entries.
+        if pubkey_changed || state_changed || ips_changed || port_changed {
+            // On a learner replica: forward the client's update to the leader
+            // and return the leader's (linearizable) reply, so clients work
+            // transparently against any node.
+            if let Some(mut leader) = self.leader_client().await? {
+                info!("forwarding get_addresses update to leader");
+                let mut forwarded = Request::new(request.clone());
+                forward_metadata(&request_metadata, &mut forwarded);
+                return leader.get_addresses(forwarded).await;
             }
-
-            let address = IpAddr::from_str(result.get("ip_address"))
-                .map_err(|_| Status::new(Code::InvalidArgument, "Invalid address"))?;
-            if net.contains(&address) {
-                final_addresses.push(match (&net, &address) {
-                    (IpNet::V4(net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, net.prefix_len())
-                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                        .into(),
-                    (IpNet::V6(net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, net.prefix_len())
-                        .map_err(|_| Status::new(Code::InvalidArgument, "Invalid network"))?
-                        .into(),
-                    _ => unreachable!(),
-                });
-            }
-            debug!(
-                auth_peer.peerid,
-                "Address: {:?}",
-                result.get::<&str, &str>("ip_address")
-            );
-            debug!(
-                auth_peer.peerid,
-                "Network: {:?}",
-                result.get::<&str, &str>("network")
-            );
-        }
-        debug!("comparing local_ips to networks");
-        new_local_ips.retain(|x| !match x {
-            IpAddr::V4(net) => ip4range.contains(net),
-            IpAddr::V6(net) => ip6range.contains(net),
-        });
-        debug!("final local ips: {:?}", new_local_ips);
-        if new_local_ips != old_local_ips {
-            debug!("updating local ips");
-            sqlx::query(r#"UPDATE peers SET local_ips=? WHERE peerid=?"#)
-                .bind(new_local_ips.iter().map(IpAddr::to_string).join(","))
-                .bind(auth_peer.peerid)
-                .execute(&self.sqlite_pool)
+            let mutation = Mutation::UpdatePeerState {
+                peer_id: auth_peer.peerid,
+                pubkey: if pubkey_changed {
+                    Some(publickey)
+                } else {
+                    None
+                },
+                endpoint: endpoint.clone(),
+                nat_type: requested_nat_type as i32,
+                monitor: requested_node_flags.monitor,
+                relay: requested_node_flags.relay,
+                local_ips,
+                local_port: Some(local_port),
+            };
+            self.raft
+                .write(mutation)
                 .await
-                .into_status()?;
-            // sending peer update is not needed so we do net set updated to true.
+                .map_err(write_error_to_status)?;
+            if pubkey_changed {
+                info!(peerid = auth_peer.peerid, "peer re-enrolled with new key");
+            }
         }
-        let overlay_ips = self
-            .get_overlay_ips(auth_peer.peerid)
+
+        // Build the reply from the (now applied) state.
+        let mut conn = self.conn().await?;
+        let addresses = wireguard_addresses(&mut conn, auth_peer.peerid)
             .await
-            .map_err(|_| Status::internal("allowed IP error"))?;
-        let reply = AddressReply::new(&final_addresses, &overlay_ips);
-
-        if updated {
-            debug!("update triggered");
-            let peer = self
-                .get_peer_from_peerid(auth_peer.peerid)
-                .await?
-                .ok_or_else(|| Status::internal("Peer deleted"))?;
-            self.send_peer_event(eventtype, peer.clone()).await;
-        } else {
-            debug!("No update sent!");
-        }
-
-        Ok(Response::new(reply))
+            .map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })?;
+        let overlay_ips = state_reader::overlay_ips(&mut conn, auth_peer.peerid)
+            .await
+            .map_err(|e| {
+                error!("SQL Error: {e}");
+                Status::internal("SQL Error")
+            })?;
+        Ok(Response::new(AddressReply::new(&addresses, &overlay_ips)))
     }
 
-    #[instrument]
+    /// Event stream with raft-index-based resume cursor.
+    #[instrument(skip(self, request))]
     async fn get_events(
         &self,
         request: Request<EventsRequest>,
     ) -> Result<Response<Self::getEventsStream>, Status> {
         let auth_peer = self.authenticate(request.metadata(), 0).await?;
-        let event_list_guard = self.event_list.read().await;
-        let request = request.into_inner();
-        let events = if request.start_event == 0 {
-            info!("initial");
+        let start_event = request.into_inner().start_event;
+        let initial_events = if start_event == 0 {
             self.get_initial_events(&auth_peer).await?
-        } else if let Some(event) = event_list_guard.borrow().front() {
-            match request.start_event.cmp(&event.id) {
-                cmp::Ordering::Greater => {
-                    info!("initial2");
-                    self.get_initial_events(&auth_peer).await?
-                }
-                cmp::Ordering::Equal => {
-                    info!("empty");
-                    Vec::new()
-                }
-                cmp::Ordering::Less => {
-                    info!("skip");
-                    event_list_guard
-                        .iter()
-                        .skip_while(|x| x.id < request.start_event)
-                        .cloned()
-                        .collect()
-                }
-            }
         } else {
-            info!("initial3");
-            self.get_initial_events(&auth_peer).await?
+            Vec::new()
         };
-        let (tx, rx) = channel(max(
-            EVENT_DEQUE_MAX_CAPACITY,
-            events.len() + EVENT_DEQUE_MAX_CAPACITY / 2,
-        ));
-        {
-            let mut guard = self.event_listeners.write().await;
-            guard.borrow_mut().insert(auth_peer.peerid, tx.clone());
-        };
-        info!("sending");
-        for event in events {
-            info!("sending: {:?}", event);
-            tx.send(Ok(event))
-                .await
-                .expect_or_log("Could not fill channel, should have capacity");
-        }
-        info!("sent");
-        Ok(Response::new(Box::pin(
-            tokio_stream::wrappers::ReceiverStream::new(rx),
-        )))
+        let stream = self
+            .events
+            .register(auth_peer.peerid, start_event, initial_events)
+            .await;
+        Ok(Response::new(stream))
     }
 
-    #[instrument]
-    #[allow(clippy::map_entry)]
+    /// Create a user. Admin-only (permission 100).
+    #[instrument(skip(self, request))]
+    async fn create_user(
+        &self,
+        request: Request<CreateUserRequest>,
+    ) -> Result<Response<CreateUserReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.create_user(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
+        self.authenticate(request.metadata(), 100).await?;
+        let request = request.into_inner();
+        let mutation = Mutation::CreateUser {
+            name: request.name,
+            permissions: request.permissions as i32,
+        };
+        self.raft
+            .write(mutation)
+            .await
+            .map_err(write_error_to_status)?;
+        Ok(Response::new(CreateUserReply {}))
+    }
+
+    /// Delete a user. Admin-only. Owned nodes lose the ownership link but
+    /// keep running.
+    #[instrument(skip(self, request))]
+    async fn delete_user(
+        &self,
+        request: Request<DeleteUserRequest>,
+    ) -> Result<Response<DeleteUserReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.delete_user(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
+        self.authenticate(request.metadata(), 100).await?;
+        let request = request.into_inner();
+        let user_id = self.lookup_user_id(&request.name).await?;
+        let mutation = Mutation::DeleteUser { user_id };
+        self.raft
+            .write(mutation)
+            .await
+            .map_err(write_error_to_status)?;
+        Ok(Response::new(DeleteUserReply {}))
+    }
+
+    /// Change a user (currently: permission level). Admin-only.
+    #[instrument(skip(self, request))]
+    async fn change_user(
+        &self,
+        request: Request<ChangeUserRequest>,
+    ) -> Result<Response<ChangeUserReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.change_user(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
+        self.authenticate(request.metadata(), 100).await?;
+        let request = request.into_inner();
+        let user_id = self.lookup_user_id(&request.name).await?;
+        match request.what {
+            Some(change_user_request::What::PermissionLevel(level)) => {
+                let mutation = Mutation::SetUserPermissions {
+                    user_id,
+                    permissions: level as i32,
+                };
+                self.raft
+                    .write(mutation)
+                    .await
+                    .map_err(write_error_to_status)?;
+            }
+            _ => return Err(Status::invalid_argument("Invalid what")),
+        }
+        Ok(Response::new(ChangeUserReply {}))
+    }
+
+    /// Add a peer; must reach the leader. The enrollment token is generated
+    /// here on the leader and carried in the log entry. The node is linked
+    /// to the acting user; the permission cap is applied at apply time.
+    #[instrument(skip(self, request))]
     async fn add_peer(
         &self,
         request: Request<AddPeerRequest>,
     ) -> Result<Response<AddPeerReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.add_peer(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
         let metadata = request.metadata();
-        self.authenticate(metadata, 1).await?;
+        let auth_peer = self.authenticate(metadata, 1).await?;
         let request = request.get_ref();
         if request.permissions > 0 {
             self.authenticate(metadata, request.permissions + 1).await?;
         }
+        let user_id = self.owner_user_id(auth_peer.peerid).await?;
         let token = Uuid::new_v4();
-        let addresses: Vec<IpNet> = request
+        // Requested addresses with their prefixes; the state machine stores
+        // the host address and looks the network row up by the truncated
+        // subnet.
+        let addresses: Vec<ipnet::IpNet> = request
             .internal_ip
             .iter()
-            .filter_map(|x| x.try_into().ok())
+            .filter_map(|x| x.clone().try_into().ok())
             .collect();
 
-        let mut networkid_map: HashMap<IpNet, i64> = HashMap::new();
-        let mut addr_network_map: HashMap<IpNet, IpNet> = HashMap::new();
-        for addr in addresses {
-            let net = addr.clone().trunc();
-            if !networkid_map.contains_key(&net) {
-                let result =
-                    sqlx::query("SELECT networkid FROM networks WHERE network=? AND ipv6=?")
-                        .bind(net.to_string())
-                        .bind(match net {
-                            IpNet::V6(_) => true,
-                            IpNet::V4(_) => false,
-                        })
-                        .fetch_one(&self.sqlite_pool)
-                        .await
-                        .map_err(|_| Status::internal("SQL error: Could not find network"))?;
-                networkid_map.insert(net, result.get("networkid"));
-            }
-            addr_network_map.insert(addr, net);
-        }
-
-        let mut transaction = self
-            .sqlite_pool
-            .begin()
-            .await
-            .map_err(|_| Status::internal("SQL Error: could not start transaction"))?;
-        let peerid =
-            sqlx::query("INSERT INTO peers (peer_name, token, permissions) VALUES (?, ?, ?)")
-                .bind(&request.name)
-                .bind(token)
-                .bind(request.permissions)
-                .execute(&mut *transaction)
-                .await
-                .into_status()?
-                .last_insert_rowid();
-
-        for net in addr_network_map.keys() {
-            sqlx::query("INSERT INTO addresses (peerid, networkid, ip_address) VALUES (?, ?, ?)")
-                .bind(peerid)
-                .bind(networkid_map[&addr_network_map[net]])
-                .bind(net.addr().to_string())
-                .execute(&mut *transaction)
-                .await
-                .into_status()?;
-        }
-        transaction.commit().await.into_status()?;
-
-        let reply = AddPeerReply {
-            token: token.as_bytes().to_vec(),
+        let mutation = Mutation::AddPeer {
+            user_id,
+            name: request.name.clone(),
+            token,
+            permissions: request.permissions,
+            addresses,
         };
-        Ok(Response::new(reply))
+        let response = self
+            .raft
+            .write(mutation)
+            .await
+            .map_err(write_error_to_status)?;
+        let reply_token = response
+            .token
+            .expect("AddPeer response always carries a token");
+        Ok(Response::new(AddPeerReply {
+            token: reply_token.as_bytes().to_vec(),
+        }))
     }
 
-    #[instrument]
+    #[instrument(skip(self, request))]
     async fn delete_peer(
         &self,
         request: Request<DeletePeerRequest>,
     ) -> Result<Response<DeletePeerReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.delete_peer(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
         self.authenticate(request.metadata(), 1).await?;
-
         let request = request.into_inner();
         let peerid = self
             .get_peerid_from_identifier(
@@ -834,38 +691,32 @@ impl Wirespider for WirespiderServerState {
             )
             .await?;
 
-        let peer = self.get_peer_from_peerid(peerid).await?;
-
-        sqlx::query(
-            r#"
-            DELETE FROM peers WHERE peerid=?
-            "#,
-        )
-        .bind(peerid)
-        .execute(&self.sqlite_pool)
-        .await
-        .into_status()?;
-
-        if let Some(peer) = peer {
-            self.send_peer_event(EventType::Deleted, peer.clone()).await;
-        }
-
-        //remove peer from senders, if the peer is in it, to prevent it from getting more info
-        self.event_listeners
-            .write()
+        let mutation = Mutation::DeletePeer { peer_id: peerid };
+        self.raft
+            .write(mutation)
             .await
-            .borrow_mut()
-            .remove(&peerid);
-
-        let reply = DeletePeerReply {};
-        Ok(Response::new(reply))
+            .map_err(write_error_to_status)?;
+        self.events.remove(peerid).await;
+        Ok(Response::new(DeletePeerReply {}))
     }
 
-    #[instrument]
+    #[instrument(skip(self, request))]
     async fn change_peer(
         &self,
         request: Request<ChangePeerRequest>,
     ) -> Result<Response<ChangePeerReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.change_peer(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
         let auth_peer = self.authenticate(request.metadata(), 0).await?;
         let request = request.into_inner();
         let peerid = self
@@ -882,12 +733,32 @@ impl Wirespider for WirespiderServerState {
                         "Only admins can change permission",
                     ));
                 }
-                sqlx::query(r#"UPDATE peers SET permissions=? WHERE peerid=?"#)
-                    .bind(level)
-                    .bind(peerid)
-                    .execute(&self.sqlite_pool)
+                let mutation = Mutation::SetPeerPermissions {
+                    peer_id: peerid,
+                    permissions: level as i32,
+                };
+                self.raft
+                    .write(mutation)
                     .await
-                    .into_status()?;
+                    .map_err(write_error_to_status)?;
+            }
+            Some(change_peer_request::What::Owner(user_name)) => {
+                // Transfer node ownership; admin-only. The permission cap
+                // re-applies at the node's next role operation.
+                if auth_peer.permissions < 100 {
+                    return Err(Status::permission_denied(
+                        "Only admins can change ownership",
+                    ));
+                }
+                let user_id = self.lookup_user_id(&user_name).await?;
+                let mutation = Mutation::SetPeerOwner {
+                    peer_id: peerid,
+                    user_id,
+                };
+                self.raft
+                    .write(mutation)
+                    .await
+                    .map_err(write_error_to_status)?;
             }
             Some(change_peer_request::What::Endpoint(endpoint)) => {
                 if auth_peer.peerid != peerid && auth_peer.permissions < 50 {
@@ -896,29 +767,36 @@ impl Wirespider for WirespiderServerState {
                 let sockaddr: SocketAddr = endpoint
                     .try_into()
                     .map_err(|_| Status::invalid_argument("invalid endpoint"))?;
-                sqlx::query(r#"UPDATE peers SET current_endpoint=? WHERE peerid=?"#)
-                    .bind(sockaddr.to_string())
-                    .bind(peerid)
-                    .execute(&self.sqlite_pool)
+                let mutation = Mutation::SetPeerEndpoint {
+                    peer_id: peerid,
+                    endpoint: sockaddr.to_string(),
+                };
+                self.raft
+                    .write(mutation)
                     .await
-                    .into_status()?;
-                let peer = self
-                    .get_peer_from_peerid(peerid)
-                    .await?
-                    .ok_or_else(|| Status::invalid_argument("peer not complete, login first?"))?;
-                self.send_peer_event(EventType::Changed, peer).await;
+                    .map_err(write_error_to_status)?;
             }
             _ => return Err(Status::invalid_argument("Invalid what")),
         }
         Ok(Response::new(ChangePeerReply {}))
     }
 
-    #[instrument]
+    #[instrument(skip(self, request))]
     async fn add_route(&self, request: Request<Route>) -> Result<Response<AddRouteReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.add_route(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
         self.authenticate(request.metadata(), 1).await?;
-
         let route = request.into_inner();
-        let route_copy = route.clone();
         let to: IpNet = route
             .to
             .ok_or_else(|| Status::invalid_argument("destination missing"))?
@@ -930,34 +808,33 @@ impl Wirespider for WirespiderServerState {
             .try_into()
             .map_err(|_| Status::invalid_argument("Invalid via address"))?;
 
-        let addressid: i64 = sqlx::query("SELECT addressid FROM addresses WHERE ip_address=?")
-            .bind(via.to_string())
-            .fetch_one(&self.sqlite_pool)
+        let mutation = Mutation::AddRoute {
+            destination: to,
+            via_ip: via,
+        };
+        self.raft
+            .write(mutation)
             .await
-            .into_status()?
-            .try_get("addressid")
-            .into_status()?;
-
-        sqlx::query("INSERT INTO routes (addressid, destination) VALUES (?, ?)")
-            .bind(addressid)
-            .bind(to.to_string())
-            .execute(&self.sqlite_pool)
-            .await
-            .into_status()?;
-
-        self.send_route_event(EventType::New, route_copy.clone())
-            .await;
-
-        let reply = AddRouteReply {};
-        Ok(Response::new(reply))
+            .map_err(write_error_to_status)?;
+        Ok(Response::new(AddRouteReply {}))
     }
 
-    #[instrument]
+    #[instrument(skip(self, request))]
     async fn del_route(&self, request: Request<Route>) -> Result<Response<DelRouteReply>, Status> {
+        let request_metadata = request.metadata().clone();
+        let inner = request.get_ref().clone();
+        if let Some(response) = self
+            .forward_with(request_metadata, |mut client, metadata| {
+                let mut request = Request::new(inner);
+                forward_metadata(&metadata, &mut request);
+                Box::pin(async move { client.del_route(request).await })
+            })
+            .await?
+        {
+            return Ok(response);
+        }
         self.authenticate(request.metadata(), 1).await?;
-
         let route = request.into_inner();
-        let route_copy = route.clone();
         let to: IpNet = route
             .to
             .ok_or_else(|| Status::invalid_argument("destination missing"))?
@@ -969,25 +846,114 @@ impl Wirespider for WirespiderServerState {
             .try_into()
             .map_err(|_| Status::invalid_argument("Invalid via address"))?;
 
-        let addressid: i64 = sqlx::query("SELECT addressid FROM addresses WHERE address=?")
-            .bind(via.to_string())
-            .fetch_one(&self.sqlite_pool)
+        let mutation = Mutation::DeleteRoute {
+            destination: to,
+            via_ip: via,
+        };
+        self.raft
+            .write(mutation)
             .await
-            .into_status()?
-            .try_get("addressid")
-            .into_status()?;
-
-        sqlx::query("DELETE FROM routes WHERE addressid=? AND destination=?")
-            .bind(addressid)
-            .bind(to.to_string())
-            .execute(&self.sqlite_pool)
-            .await
-            .into_status()?;
-
-        self.send_route_event(EventType::Deleted, route_copy.clone())
-            .await;
-
-        let reply = DelRouteReply {};
-        Ok(Response::new(reply))
+            .map_err(write_error_to_status)?;
+        Ok(Response::new(DelRouteReply {}))
     }
 }
+
+impl WirespiderServerState {
+    /// Initial event dump for a fresh event stream: all enrolled peers except
+    /// the requesting one, plus all routes.
+    async fn get_initial_events(
+        &self,
+        auth_peer: &AuthenticatedPeer,
+    ) -> Result<Vec<Event>, Status> {
+        let mut conn = self.conn().await?;
+        let mut events = Vec::new();
+        let results =
+            sqlx::query(r#"SELECT peerid FROM peers WHERE peerid!=? AND pubkey IS NOT NULL"#)
+                .bind(auth_peer.peerid)
+                .fetch_all(&mut *conn)
+                .await
+                .map_err(|e| {
+                    error!("SQL Error: {e}");
+                    Status::internal("SQL Error")
+                })?;
+        for row in results {
+            let peerid: i64 = row.get("peerid");
+            if let Some(peer) = state_reader::peer_proto(&mut conn, peerid)
+                .await
+                .map_err(|e| {
+                    error!("SQL Error: {e}");
+                    Status::internal("SQL Error")
+                })?
+            {
+                events.push(Event::from_peer(0, EventType::New, peer));
+            }
+        }
+        let routes = sqlx::query(
+            r#"
+            SELECT r.destination, a.ip_address FROM routes r
+            LEFT JOIN addresses a USING(addressid)
+            LEFT JOIN peers p USING(peerid)
+            WHERE a.peerid!=? AND p.pubkey IS NOT NULL"#,
+        )
+        .bind(auth_peer.peerid)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| {
+            error!("SQL Error: {e}");
+            Status::internal("SQL Error")
+        })?;
+        for row in routes {
+            let destination: String = row.get("destination");
+            let via: String = row.get("ip_address");
+            if let (Ok(dest), Ok(via)) = (IpNet::from_str(&destination), IpAddr::from_str(&via)) {
+                events.push(Event::from_route(0, EventType::New, Route::new(dest, via)));
+            }
+        }
+        Ok(events)
+    }
+}
+
+/// wireguard networks containing the peer's addresses, for the reply.
+async fn wireguard_addresses(
+    conn: &mut SqliteConnection,
+    peerid: i64,
+) -> Result<Vec<IpNet>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT a.ip_address, n.network, n.ipv6 FROM addresses a LEFT JOIN networks n USING(networkid) WHERE a.peerid=? and n.network_type='wireguard'"#,
+    )
+    .bind(peerid)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut nets = Vec::new();
+    for row in &rows {
+        let Ok(net) = state_reader::parse_network(row) else {
+            continue;
+        };
+        let Ok(address) = row.try_get::<String, _>("ip_address") else {
+            continue;
+        };
+        let Ok(address) = IpAddr::from_str(&address) else {
+            continue;
+        };
+        if net.contains(&address) {
+            nets.push(narrow(&net, &address));
+        }
+    }
+    Ok(nets)
+}
+
+fn narrow(net: &IpNet, address: &IpAddr) -> IpNet {
+    match (net, address) {
+        (IpNet::V4(net), IpAddr::V4(addr)) => Ipv4Net::new(*addr, net.prefix_len())
+            .map(IpNet::V4)
+            .unwrap_or(IpNet::V4(*net)),
+        (IpNet::V6(net), IpAddr::V6(addr)) => Ipv6Net::new(*addr, net.prefix_len())
+            .map(IpNet::V6)
+            .unwrap_or(IpNet::V6(*net)),
+        _ => unreachable!("network and address are of different families"),
+    }
+}
+
+use ipnet::IpNet;
+use ipnet::Ipv4Net;
+use ipnet::Ipv6Net;

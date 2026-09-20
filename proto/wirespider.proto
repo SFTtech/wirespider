@@ -6,6 +6,11 @@ service Wirespider {
     rpc getEvents (EventsRequest) returns (stream Event);
 
     // --- manage ---
+    // users
+    rpc createUser (CreateUserRequest) returns (CreateUserReply);
+    rpc deleteUser (DeleteUserRequest) returns (DeleteUserReply);
+    rpc changeUser (ChangeUserRequest) returns (ChangeUserReply);
+
     // peers
     rpc addPeer (AddPeerRequest) returns (AddPeerReply);
     rpc deletePeer (DeletePeerRequest) returns (DeletePeerReply);
@@ -15,6 +20,28 @@ service Wirespider {
     rpc addRoute (Route) returns (AddRouteReply);
     rpc delRoute (Route) returns (DelRouteReply);
 }
+
+message CreateUserRequest {
+    string name = 1;
+    uint32 permissions = 2;
+}
+
+message CreateUserReply {}
+
+message DeleteUserRequest {
+    string name = 1;
+}
+
+message DeleteUserReply {}
+
+message ChangeUserRequest {
+    string name = 1;
+    oneof what {
+        uint32 permission_level = 2;
+    }
+}
+
+message ChangeUserReply {}
 
 message AddressRequest {
     bytes wg_public_key = 1;
@@ -68,6 +95,8 @@ message ChangePeerRequest {
     oneof what {
         uint32 permission_level = 2;
         Endpoint endpoint = 3;
+        // Transfer ownership of this node to the named user. Admin-only.
+        string owner = 4;
     }
 }
 
@@ -151,3 +180,83 @@ message Network {
     IP ip = 1;
     uint32 prefix_len = 2;
 }
+// --- raft ---
+
+service Raft {
+    rpc vote (SignedRaftVoteRequest) returns (SignedRaftVoteResponse);
+    rpc append (SignedRaftAppendRequest) returns (SignedRaftAppendResponse);
+    rpc snapshot (stream SignedRaftSnapshotChunk) returns (SignedRaftSnapshotResponse);
+}
+
+// Envelope for a signed raft RPC payload.
+//
+// `payload` is the JSON serialization of the openraft request; `signature` is
+// the ed25519 signature of the sending node's raft key over the payload bytes
+// and `payload_type` binds the signature to one RPC kind, preventing
+// cross-type replay. The receiver verifies against the enrolled node keys.
+message SignedRaftPayload {
+    bytes payload = 1;
+    bytes signature = 2;
+    string payload_type = 3;
+    bytes signer = 4;
+}
+
+message SignedRaftVoteRequest {
+    SignedRaftPayload payload = 1;
+}
+
+message SignedRaftVoteResponse {
+    SignedRaftPayload payload = 1;
+}
+
+message SignedRaftAppendRequest {
+    SignedRaftPayload payload = 1;
+}
+
+message SignedRaftAppendResponse {
+    SignedRaftPayload payload = 1;
+}
+
+message SignedRaftSnapshotChunk {
+    SignedRaftPayload header = 1;
+    bytes data = 2;
+    bool done = 3;
+}
+
+message SignedRaftSnapshotResponse {
+    SignedRaftPayload payload = 1;
+}
+
+// Operator join request: a new server presents its raft pubkey and advertised
+// address to an existing member, which adds it as learner if it is the leader.
+service RaftControl {
+    rpc join (RaftJoinRequest) returns (RaftJoinResponse);
+    rpc promote (RaftPromoteRequest) returns (RaftPromoteResponse);
+    rpc leave (RaftLeaveRequest) returns (RaftLeaveResponse);
+}
+
+message RaftLeaveRequest {
+    bytes pubkey = 1;
+}
+
+message RaftLeaveResponse {}
+
+message RaftJoinRequest {
+    bytes pubkey = 1;
+    string advertise = 2;
+}
+
+message RaftJoinResponse {
+    bool added = 1;
+    // Public keys of all current cluster members. The joining node stores
+    // them as its bootstrap allowlist: it cannot replicate-in membership
+    // before it accepts signed RPCs, and it cannot accept signed RPCs from
+    // members it does not know.
+    repeated bytes members = 2;
+}
+
+message RaftPromoteRequest {
+    bytes pubkey = 1;
+}
+
+message RaftPromoteResponse {}

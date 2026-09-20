@@ -9,7 +9,7 @@ use ipnet::IpNet;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct ServerRunCommand {
     #[command(flatten)]
     pub base: ServerBaseOptions,
@@ -46,6 +46,77 @@ pub enum ServerDatabaseCommand {
 
     #[command(name = "migrate", about = "Run database migrations")]
     Migrate(DatabaseOptions),
+
+    #[command(
+        name = "raft-init",
+        about = "Initialize a new single-node raft cluster on this server's database"
+    )]
+    RaftInit(DatabaseOptions),
+
+    #[command(
+        name = "raft-join",
+        about = "Ask an existing cluster member to add this node's raft key to the cluster"
+    )]
+    RaftJoin(RaftJoinCommand),
+
+    #[command(
+        name = "raft-promote",
+        about = "Promote this learner replica to voter (manual failover, requires healthy primary)"
+    )]
+    RaftPromote(RaftPromoteCommand),
+
+    #[command(
+        name = "raft-leave",
+        about = "Remove this node from the raft cluster (server -> client role switch; requires quorum on surviving members)"
+    )]
+    RaftLeave(RaftLeaveCommand),
+
+    #[command(
+        name = "raft-takeover",
+        about = "Re-initialize this node as a single-voter cluster from its applied state (DANGEROUS: only if the primary is permanently lost)"
+    )]
+    RaftTakeover(RaftTakeoverCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct RaftLeaveCommand {
+    #[command(flatten)]
+    pub db: DatabaseOptions,
+    /// gRPC endpoint of a surviving cluster member (format: http://host:port)
+    #[arg(long, value_hint = ValueHint::Url, help = "Endpoint of a surviving cluster member")]
+    pub member: Uri,
+}
+
+#[derive(Debug, Args)]
+pub struct RaftPromoteCommand {
+    #[command(flatten)]
+    pub db: DatabaseOptions,
+    /// gRPC endpoint of the current leader (format: http://host:port)
+    #[arg(long, value_hint = ValueHint::Url, help = "Endpoint of the current leader")]
+    pub leader: Uri,
+}
+
+#[derive(Debug, Args)]
+pub struct RaftTakeoverCommand {
+    #[command(flatten)]
+    pub db: DatabaseOptions,
+    #[arg(
+        long,
+        help = "Confirm that acknowledged writes which never reached this replica are lost"
+    )]
+    pub confirm_loss: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RaftJoinCommand {
+    #[command(flatten)]
+    pub db: DatabaseOptions,
+    /// gRPC endpoint of an existing cluster member (format: http://host:port)
+    #[arg(long, value_hint = ValueHint::Url, help = "Endpoint of an existing cluster member")]
+    pub member: Uri,
+    /// Raft gRPC port advertised to other cluster members
+    #[arg(long, help = "host:port this node's raft gRPC service is reachable at")]
+    pub advertise: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -101,16 +172,23 @@ pub struct CreateAdminCommand {
     pub addresses: Vec<IpNet>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct ServerBaseOptions {
     // enable debug
     #[arg(long, help = "Enable debug output")]
     pub debug: bool,
+    /// Build a raft snapshot after this many log entries (default: 5000)
+    #[arg(
+        long,
+        env = "WS_RAFT_SNAPSHOT_LOGS",
+        help = "Build a raft snapshot after this many log entries"
+    )]
+    pub raft_snapshot_logs_since_last: Option<u64>,
     #[command(flatten)]
     pub db: DatabaseOptions,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct DatabaseOptions {
     #[arg(short('d'), long, env, value_hint = ValueHint::Url, help = "URL to database. Needs to start with \"sqlite:\"")]
     pub database_url: String,
@@ -140,7 +218,7 @@ pub enum Cli {
 
 #[derive(Args, Debug)]
 pub struct CompletionCommand {
-    #[arg(help = "Shell type", value_parser = ["bash","elvish","fish","powershell","zsh"])]
+    #[arg(help = "Shell type")]
     pub shell: Shell,
 }
 
@@ -286,8 +364,20 @@ pub struct ChangePeerCommand {
     pub connection: ConnectionOptions,
     #[command(flatten)]
     pub peer: CliPeerIdentifier,
-    #[arg(help = "Endpoint to report to other peers")]
-    pub new_endpoint: SocketAddr,
+    /// New endpoint to report for the peer (mutually exclusive with --owner)
+    #[arg(
+        long,
+        group = "change_what",
+        help = "Endpoint to report to other peers"
+    )]
+    pub new_endpoint: Option<SocketAddr>,
+    /// Transfer ownership of this node to the named user (admin only)
+    #[arg(
+        long,
+        group = "change_what",
+        help = "User to transfer node ownership to"
+    )]
+    pub owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

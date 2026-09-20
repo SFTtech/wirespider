@@ -26,13 +26,15 @@ use tokio::sync::OnceCell;
 
 /// gRPC port of the wirespider server.
 pub const SERVER_PORT: u16 = 49582;
+/// Env var: build a raft snapshot after this many log entries (test knob).
+pub const SNAPSHOT_ENV_KEY: &str = "WS_TEST_RAFT_SNAPSHOT_LOGS";
 /// Wireguard network distributed to all peers.
 pub const WG_NETWORK: &str = "10.99.0.0/24";
 /// Tunnel address of the admin peer. The admin has no client, so its address
 /// can safely be used as route target without any node routing to itself.
 pub const ADMIN_IP: &str = "10.99.0.1";
 /// Database location inside the server container.
-const DB_URL: &str = "sqlite:/tmp/wirespider-test.db";
+pub const DB_URL: &str = "sqlite:/tmp/wirespider-test.db";
 const IMAGE_NAME: &str = "wirespider-integration-test";
 const MUSL_TARGET: &str = "x86_64-unknown-linux-musl";
 const EXEC_TIMEOUT: Duration = Duration::from_secs(120);
@@ -45,6 +47,8 @@ pub struct Cluster {
     /// The dedicated network is dropped after the server container so that
     /// the containers are removed before the network is deleted.
     network: ClusterNetwork,
+    /// Container ids of additional raft members (started by `add_server`).
+    extra_server_ids: std::sync::Mutex<Vec<String>>,
 }
 
 /// A dedicated docker network for one test cluster.
@@ -164,8 +168,13 @@ async fn node_image() -> Result<GenericImage> {
 
 async fn build_node_image() -> Result<GenericImage> {
     let binary = wirespider_binary().await?;
-    // fingerprint the binary so the image tag changes with it and the docker
-    // build cache is used efficiently
+    // fingerprint the binary AND the dockerfile so image tags change with
+    // either, keeping the docker build cache correct
+    const DOCKERFILE: &str = r#"FROM docker.io/library/alpine:3.22
+RUN apk add --no-cache iproute2 wireguard-tools iputils sqlite
+COPY wirespider /usr/bin/wirespider
+RUN chmod +x /usr/bin/wirespider && wirespider --help > /dev/null && wirespider generate-completion bash > /dev/null
+"#;
     let fingerprint = tokio::task::spawn_blocking({
         let binary = binary.clone();
         move || -> Result<String> {
@@ -174,20 +183,14 @@ async fn build_node_image() -> Result<GenericImage> {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             bytes.len().hash(&mut hasher);
             hasher.write(&bytes);
+            DOCKERFILE.hash(&mut hasher);
             Ok(format!("{:016x}", hasher.finish()))
         }
     })
     .await??;
 
     let image = GenericBuildableImage::new(IMAGE_NAME, format!("it-{fingerprint}"))
-        .with_dockerfile_string(
-            r#"FROM docker.io/library/alpine:3.22
-RUN apk add --no-cache iproute2 wireguard-tools iputils
-COPY wirespider /usr/bin/wirespider
-RUN chmod +x /usr/bin/wirespider && wirespider --help > /dev/null
-"#
-            .to_string(),
-        )
+        .with_dockerfile_string(DOCKERFILE.to_string())
         .with_file(&binary, "wirespider")
         .build_image()
         .await
@@ -369,14 +372,28 @@ impl Cluster {
             .with_context(|| format!("could not parse the admin token from {output:?}"))?
             .to_string();
 
+        // Initialize the raft cluster last: it imports the locally created
+        // rows (network, admin) into the log so they replicate.
+        exec_ok(
+            &server,
+            &["wirespider", "database", "raft-init", "-d", DB_URL],
+            &env,
+        )
+        .await
+        .context("could not initialize the raft cluster")?;
+
         // start the server process and wait for the grpc port
+        let snapshot_flag = std::env::var(SNAPSHOT_ENV_KEY)
+            .ok()
+            .map(|v| format!("--raft-snapshot-logs-since-last {v}"))
+            .unwrap_or_default();
         exec_ok(
             &server,
             &[
                 "sh",
                 "-c",
                 &format!(
-                    "wirespider start-server --debug -d {DB_URL} --bind 0.0.0.0:{SERVER_PORT} \
+                    "wirespider start-server --debug {snapshot_flag} -d {DB_URL} --bind 0.0.0.0:{SERVER_PORT} \
                  >/var/log/server.log 2>&1 </dev/null &"
                 ),
             ],
@@ -399,7 +416,87 @@ impl Cluster {
             admin_token,
             server_ip,
             network,
+            extra_server_ids: std::sync::Mutex::new(Vec::new()),
         })
+    }
+
+    /// Start an additional raft member container.
+    ///
+    /// The container runs `wirespider server database raft-init` style setup:
+    /// migrate + raft-join against the primary server, then start the server
+    /// process on the same port.
+    pub async fn add_server(&self, index: usize) -> Result<ContainerAsync<GenericImage>> {
+        let image = node_image().await?;
+        let container = image
+            .clone()
+            .with_cmd(["tail", "-f", "/dev/null"])
+            .with_network(&self.network.name)
+            .start()
+            .await
+            .context("could not start an additional raft member container")?;
+        let container_ip = container_ipv4(&self.network.docker, &container).await?;
+        let server_ip = self.server_ip;
+
+        let env = [("DATABASE_URL", DB_URL)];
+        exec_ok(
+            &container,
+            &["wirespider", "database", "migrate", "-d", DB_URL],
+            &env,
+        )
+        .await
+        .context("could not migrate the additional server database")?;
+        exec_ok(
+            &container,
+            &[
+                "wirespider",
+                "database",
+                "raft-join",
+                "-d",
+                DB_URL,
+                "--member",
+                &format!("http://{server_ip}:{SERVER_PORT}"),
+                "--advertise",
+                &format!("{container_ip}:{SERVER_PORT}"),
+            ],
+            &env,
+        )
+        .await
+        .context("could not join the additional server to the raft cluster")?;
+
+        // WS_TEST_RAFT_SNAPSHOT_LOGS lowers the snapshot threshold so
+        // compaction and snapshot transfer can be exercised in tests.
+        let snapshot_flag = std::env::var(SNAPSHOT_ENV_KEY)
+            .ok()
+            .map(|v| format!("--raft-snapshot-logs-since-last {v}"))
+            .unwrap_or_default();
+        exec_ok(
+            &container,
+            &[
+                "sh",
+                "-c",
+                &format!(
+                    "wirespider start-server --debug {snapshot_flag} -d {DB_URL} --bind 0.0.0.0:{SERVER_PORT} \
+                 >/var/log/server-{index}.log 2>&1 </dev/null &"
+                ),
+            ],
+            &[],
+        )
+        .await?;
+        exec_until_ok(
+            &container,
+            &["nc", "-z", "127.0.0.1", &SERVER_PORT.to_string()],
+            &[],
+            Duration::from_secs(60),
+            Duration::from_millis(250),
+        )
+        .await
+        .context("the additional raft member did not come up in time")?;
+
+        self.extra_server_ids
+            .lock()
+            .unwrap()
+            .push(container.id().to_string());
+        Ok(container)
     }
 
     /// Create a peer on the server and start a client container for it.
@@ -424,6 +521,56 @@ impl Cluster {
         // therefore skips stun detection completely
         let fixed_endpoint = SocketAddr::from((container_ip, wg_port));
         let server_ip = self.server_ip;
+        exec_ok(
+            &container,
+            &[
+                "sh",
+                "-c",
+                &format!(
+                    "wirespider start-client --debug \
+                     --endpoint http://{server_ip}:{SERVER_PORT} \
+                     --token {token} \
+                     --device wg0 \
+                     --port {wg_port} \
+                     --fixed-endpoint {fixed_endpoint} \
+                     --private-key /tmp/{name}-privkey \
+                     >/var/log/{name}.log 2>&1 </dev/null &"
+                ),
+            ],
+            &[],
+        )
+        .await
+        .with_context(|| format!("could not start the wirespider client for {name}"))?;
+
+        Ok(Node {
+            name,
+            tunnel_ip,
+            container,
+        })
+    }
+
+    /// Like [`Self::add_node`], but the client talks to `server_ip` (e.g. a
+    /// learner replica) instead of the primary server.
+    pub async fn add_node_against(&self, server_ip: &Ipv4Addr) -> Result<Node> {
+        let name = format!("node-{}", uuid::Uuid::new_v4().simple());
+        let tunnel_ip: Ipv4Addr = format!("10.99.0.{}", 60 + (rand_shift() % 30))
+            .parse()
+            .unwrap();
+        let wg_port = 52000 + (rand_shift() % 1000) as u16;
+        let token = self.add_peer(&name, &format!("{tunnel_ip}/24")).await?;
+
+        let container = self
+            .image
+            .clone()
+            .with_cmd(["tail", "-f", "/dev/null"])
+            .with_cap_add("NET_ADMIN")
+            .with_cap_add("NET_RAW")
+            .with_network(&self.network.name)
+            .start()
+            .await
+            .with_context(|| format!("could not start a container for {name}"))?;
+        let container_ip = container_ipv4(&self.network.docker, &container).await?;
+        let fixed_endpoint = SocketAddr::from((container_ip, wg_port));
         exec_ok(
             &container,
             &[
@@ -500,11 +647,41 @@ impl Cluster {
         Ok(token.to_string())
     }
 
+    /// The ipv4 address of the primary server container in the cluster network.
+    pub async fn container_ipv4_pub(&self) -> Result<Ipv4Addr> {
+        container_ipv4(&self.network.docker, &self.server).await
+    }
+
+    /// The ipv4 address of an arbitrary container in the cluster network.
+    pub async fn container_ipv4_by_id(
+        &self,
+        container: &ContainerAsync<GenericImage>,
+    ) -> Result<Ipv4Addr> {
+        container_ipv4(&self.network.docker, container).await
+    }
+
     /// Print the server log, used to enrich test failures.
     pub async fn dump_server_log(&self) {
         eprintln!("===== server log =====");
         if let Ok((log, _, _)) = exec(&self.server, &["cat", "/var/log/server.log"], &[]).await {
             eprintln!("{log}");
+        }
+        let extra_ids = self.extra_server_ids.lock().unwrap().clone();
+        for (i, id) in extra_ids.iter().enumerate() {
+            eprintln!("===== raft member {i} log =====");
+            use futures::TryStreamExt;
+            let mut logs = self.network.docker.logs(
+                id,
+                Some(
+                    bollard::query_parameters::LogsOptionsBuilder::new()
+                        .stdout(true)
+                        .stderr(true)
+                        .build(),
+                ),
+            );
+            while let Some(chunk) = logs.try_next().await.ok().flatten() {
+                eprint!("{chunk}");
+            }
         }
     }
 }
@@ -551,5 +728,74 @@ impl Node {
         {
             eprintln!("{log}");
         }
+    }
+}
+
+/// A per-process pseudo random value for unique names/ports in tests.
+fn rand_shift() -> u32 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .hash(&mut h);
+    h.finish() as u32
+}
+
+impl Cluster {
+    /// Transfer ownership of all unowned raft node peers to the admin user.
+    /// Required before promote (permission cap re-check).
+    pub async fn assign_raft_nodes_to_admin(&self) -> Result<()> {
+        let raft_peer_names = exec_ok(
+            &self.server,
+            &[
+                "sh",
+                "-c",
+                "sqlite3 /tmp/wirespider-test.db \"SELECT peer_name FROM peers WHERE raft_pubkey IS NOT NULL AND user_id IS NULL\"",
+            ],
+            &[("DATABASE_URL", DB_URL)],
+        )
+        .await?;
+        let admin_token = exec_ok(
+            &self.server,
+            &[
+                "sh",
+                "-c",
+                "sqlite3 /tmp/wirespider-test.db \"SELECT lower(hex(token)) FROM peers WHERE peer_name='admin'\"",
+            ],
+            &[("DATABASE_URL", DB_URL)],
+        )
+        .await?;
+        let t = admin_token.trim();
+        let uuid = format!(
+            "{}-{}-{}-{}-{}",
+            &t[0..8],
+            &t[8..12],
+            &t[12..16],
+            &t[16..20],
+            &t[20..32]
+        );
+        for name in raft_peer_names.lines().filter(|l| !l.trim().is_empty()) {
+            exec_ok(
+                &self.server,
+                &[
+                    "wirespider",
+                    "send-command",
+                    "change-peer",
+                    "--endpoint",
+                    &format!("http://127.0.0.1:{}", SERVER_PORT),
+                    "--token",
+                    &uuid,
+                    "--name-id",
+                    name.trim(),
+                    "--owner",
+                    "admin-user",
+                ],
+                &[],
+            )
+            .await
+            .with_context(|| format!("could not transfer ownership of raft node {name}"))?;
+        }
+        Ok(())
     }
 }
